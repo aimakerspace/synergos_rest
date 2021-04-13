@@ -1,4 +1,4 @@
-# synergos_rest
+# Synergos REST
 
 REST-RPC component for the Synergos network
 
