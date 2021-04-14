@@ -6,7 +6,6 @@
 
 # Generic/Built-in
 import os
-import rest_rpc
 from setuptools import setup
 
 ###########
