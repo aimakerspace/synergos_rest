@@ -39,7 +39,7 @@ ns_api = Namespace(
     description='API to faciliate hyperparameter tuning in a federated grid.'
 )
 
-is_master = app.config['IS_MASTER']
+is_cluster = app.config['IS_CLUSTER']
 
 out_dir = app.config['OUT_DIR']
 
@@ -184,7 +184,7 @@ class Optimizations(Resource):
         # Limit hyperparameter tuning to only Synergos' SynCluster 
         # configuration, which supports multiple nodes, until further notice.
 
-        if is_master:
+        if not is_cluster:
             logging.error(
                 "Optimization operations only exist in SynCluster!",
                 code=403,
@@ -305,7 +305,7 @@ class Optimizations(Resource):
         # Limit hyperparameter tuning to only Synergos' SynCluster 
         # configuration, which supports multiple nodes, until further notice.
 
-        if is_master:
+        if not is_cluster:
             logging.error(
                 "Optimization operations only exist in SynCluster!",
                 code=403,

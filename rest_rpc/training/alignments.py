@@ -40,6 +40,8 @@ ns_api = Namespace(
 
 grid_idx = app.config['GRID']
 
+is_cluster = app.config['IS_CLUSTER']
+
 db_path = app.config['DB_PATH']
 collab_records = CollaborationRecords(db_path=db_path)
 expt_records = ExperimentRecords(db_path=db_path)
@@ -245,7 +247,6 @@ class Alignments(Resource):
             combination_key = (collab_id, project_id)
             combination_params = {'experiments': experiments, **request.json}
 
-            is_cluster = False
             if is_cluster:
                 # Submit parameters of federated combinations to job queue
                 queue_host = retrieved_collaboration['mq_host']
@@ -259,6 +260,7 @@ class Alignments(Resource):
                     'combination_key': combination_key,
                     'combination_params': combination_params
                 })
+                retrieved_alignments = []
             
             else:
                 # Run federated combinations sequentially using selected grid

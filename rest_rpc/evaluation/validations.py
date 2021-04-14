@@ -46,6 +46,8 @@ ns_api = Namespace(
 
 grid_idx = app.config['GRID']
 
+is_cluster = app.config['IS_CLUSTER']
+
 db_path = app.config['DB_PATH']
 collab_records = CollaborationRecords(db_path=db_path)
 project_records = ProjectRecords(db_path=db_path)
@@ -359,7 +361,6 @@ class Validations(Resource):
             **init_params
         )
 
-        is_cluster = False
         if is_cluster:
             # Submit parameters of federated combinations to job queue
             queue_host = retrieved_collaboration['mq_host']
