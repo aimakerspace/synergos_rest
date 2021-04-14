@@ -52,8 +52,12 @@ setup(
     packages=[
         "rest_rpc", 
         "rest_rpc.connection", 
+        "rest_rpc.connection.core",
         "rest_rpc.training", 
-        "rest_rpc.evaluation"
+        "rest_rpc.training.core",
+        "rest_rpc.training.core.hypertuners",
+        "rest_rpc.evaluation",
+        "rest_rpc.evaluation.core",        
     ],
     package_dir={'rest_prc': "rest_rpc"},
     package_data={'rest_prc': ["templates/**/*_schema.json"]},
