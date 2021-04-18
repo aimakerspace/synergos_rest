@@ -244,7 +244,7 @@ class Alignments(Resource):
         experiments = expt_records.read_all(filter=request.view_args)
 
         try:
-            combination_key = (collab_id, project_id)
+            combination_key = [collab_id, project_id]
             combination_params = {'experiments': experiments, **request.json}
 
             if is_cluster:

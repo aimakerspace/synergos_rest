@@ -190,13 +190,15 @@ def execute_validation_job(
     for participant_id, inference_stats in completed_validations.items():
         
         # Log the inference stats
-        worker_keys = (participant_id,) + combination_key
+        worker_keys = [participant_id] + combination_key
         validation_records.create(*worker_keys, details=inference_stats)
         retrieved_validation = validation_records.read(*worker_keys)
         retrieved_validations.append(retrieved_validation)
 
     # Log all statistics to MLFlow
-    mlf_logger.log(accumulations={combination_key: completed_validations})
+    mlf_logger.log(
+        accumulations={tuple(combination_key): completed_validations}
+    )
 
     return retrieved_validations
 

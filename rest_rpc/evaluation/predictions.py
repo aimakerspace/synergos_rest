@@ -139,7 +139,7 @@ def execute_prediction_job(
         combination_key (dict): Composite IDs of a federated combination
         combination_params (dict): Initializing parameters for a prediction job
     Returns:
-        Validation statistics (list(Document))    
+        Prediction statistics (list(Document))    
     """
     collab_id, project_id, expt_id, run_id = combination_key
     participant_id = combination_params['participants'][0]  # participant's POV
@@ -242,9 +242,7 @@ def execute_prediction_job(
                     description="Dataset characteristics are incompatible with current model.",
                     spacer_idxs=spacer_idxs,
                     ID_path=SOURCE_FILE,
-                    ID_class=Predictions.__name__, 
-                    ID_function=Predictions.post.__name__,
-                    **request.view_args
+                    ID_function=execute_prediction_job.__name__
                 )
                 ns_api.abort(
                     code=403,
@@ -258,9 +256,7 @@ def execute_prediction_job(
                 ),
                 spacer_idxs=spacer_idxs,
                 ID_path=SOURCE_FILE,
-                ID_class=Predictions.__name__, 
-                ID_function=Predictions.post.__name__,
-                **request.view_args
+                ID_function=execute_prediction_job.__name__
             )
 
             alignment_records.update(
@@ -304,7 +300,7 @@ def execute_prediction_job(
     retrieved_predictions = []
     for participant_id, inference_stats in completed_predictions.items():
         
-        worker_key = (participant_id,) + combination_key
+        worker_key = [participant_id] + combination_key
         prediction_records.create(*worker_key, details=inference_stats)
         retrieved_prediction = prediction_records.read(*worker_key)
         

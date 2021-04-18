@@ -505,7 +505,7 @@ class RPCFormatter:
 
                 if expt_id == curr_expt_id:
 
-                    combination_key = (collab_id, project_id, expt_id, run_id)
+                    combination_key = [collab_id, project_id, expt_id, run_id]
                     combination_params = {
                         'keys': run_key,
                         'action': action,
@@ -643,7 +643,7 @@ class Orchestrator:
                 stripped_alignments = self.__rpc_formatter.strip_keys(
                     relevant_alignments
                 )
-            except (KeyError, AttributeError) as e:
+            except (KeyError, AttributeError, IndexError) as e:
                 logging.error(
                     "No prior alignments have been detected! Please run multiple feature alignment first and try again!", 
                     description=f"{e}",

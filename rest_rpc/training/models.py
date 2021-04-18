@@ -165,6 +165,8 @@ def execute_training_job(
     usable_grids = rpc_formatter.extract_grids(registrations)
     selected_grid = usable_grids[grid_idx]
 
+    logging.warn(f"---> {combination_params}")
+
     training_data = execute_combination_training(
         grid=selected_grid,
         **combination_params
