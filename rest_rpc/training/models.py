@@ -303,12 +303,18 @@ class Models(Resource):
                 host=queue_host, 
                 port=queue_port
             )
+
+            train_producer.connect()
+
             for train_key, train_kwargs in training_combinations.items():
-                train_producer.process({
-                    'process': 'train',  # operations filter for MQ consumer
-                    'combination_key': train_key,
-                    'combination_params': train_kwargs
-                })
+                train_producer.process(
+                    process='train',   # operations filter for MQ consumer
+                    combination_key=train_key,
+                    combination_params=train_kwargs
+                )
+
+            train_producer.disconnect()
+
             retrieved_models = []
 
         else:

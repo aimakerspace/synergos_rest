@@ -516,12 +516,18 @@ class Predictions(Resource):
                 host=queue_host, 
                 port=queue_port
             )
+
+            predict_producer.connect()
+
             for predict_key, predict_kwargs in predict_combinations.items():
-                predict_producer.process({
-                    'process': 'predict',   # operations filter for MQ consumer
-                    'combination_key': predict_key,
-                    'combination_params': predict_kwargs
-                })
+                predict_producer.process(
+                    process='predict',   # operations filter for MQ consumer
+                    combination_key=predict_key,
+                    combination_params=predict_kwargs
+                )
+
+            predict_producer.disconnect()
+                
             all_predictions = []
         
         else:

@@ -369,12 +369,18 @@ class Validations(Resource):
                 host=queue_host, 
                 port=queue_port
             )
+
+            valid_producer.connect()
+
             for valid_key, valid_kwargs in valid_combinations.items():
-                valid_producer.process({
-                    'process': 'validate',  # operations filter for MQ consumer
-                    'combination_key': valid_key,
-                    'combination_params': valid_kwargs
-                })
+                valid_producer.process(
+                    process='validate',   # operations filter for MQ consumer
+                    combination_key=valid_key,
+                    combination_params=valid_kwargs
+                )
+
+            valid_producer.disconnect()
+
             all_validations = []
         
         else:
