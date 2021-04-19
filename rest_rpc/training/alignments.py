@@ -255,11 +255,17 @@ class Alignments(Resource):
                     host=queue_host, 
                     port=queue_port
                 )
-                preprocess_producer.process({
-                    'process': 'preprocess',  # operations filter for MQ consumer
-                    'combination_key': combination_key,
-                    'combination_params': combination_params
-                })
+
+                preprocess_producer.connect()
+
+                preprocess_producer.process(
+                    process='preprocess',   # operations filter for MQ consumer
+                    combination_key=combination_key,
+                    combination_params=combination_params
+                )
+
+                preprocess_producer.disconnect()
+                
                 retrieved_alignments = []
             
             else:
