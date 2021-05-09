@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple, Union, Callable
 import ray
 from ray import tune
 from ray.tune.ray_trial_executor import RayTrialExecutor
+from ray.tune.suggest import ConcurrencyLimiter
 
 # Custom
 from rest_rpc import app
@@ -20,6 +21,7 @@ from rest_rpc.training.core.utils import TuneParser
 from rest_rpc.training.core.hypertuners import BaseTuner 
 from rest_rpc.training.core.hypertuners.tune_driver_script import tune_proc
 from synarchive.connection import RunRecords
+from synmanager.train_operations import TrainProducerOperator
 
 ##################
 # Configurations #
@@ -43,16 +45,19 @@ logging.debug("training/optimizations.py logged", Description="No Changes")
 
 class RayTuneTuner(BaseTuner):
     """
-    Interfacing class for performing hyperparameter tuning on Ray.Tune.
+    Interfacing class for performing hyperparameter tuning on Ray.Tune. Due to
+    job parallelization, it is contingent that a queue be enforced, and thus, a
+    producer from Synergos Manager is necessary to facilitate this procedure. 
     
     Attributes:
+        producer (TrainProducerOperator): Producer to use for queuing jobs
         platform (str): What hyperparameter tuning service to use
         log_dir (str): Directory to export cached log files
     """
 
-    def __init__(self, log_dir: str = None):
+    def __init__(self, producer: TrainProducerOperator, log_dir: str = None):
         super().__init__(platform="tune", log_dir=log_dir)
-        self.log_dir = log_dir
+        self.producer = producer
 
     ############
     # Checkers #
@@ -148,7 +153,7 @@ class RayTuneTuner(BaseTuner):
         """
         """
         parsed_scheduler = tune_parser.parse_scheduler(scheduler_str=scheduler_str)
-        scheduler_args = self._retrieve_args(parsed_scheduler)
+        scheduler_args = self._retrieve_args(parsed_scheduler, **kwargs)
         initialized_scheduler = parsed_scheduler(**scheduler_args)
         return initialized_scheduler
 
@@ -157,9 +162,14 @@ class RayTuneTuner(BaseTuner):
         """ Axsearch comflicting dependencies. Dragonfly-opt is not supported
         """
         parsed_searcher = tune_parser.parse_searcher(searcher_str=searcher_str)
-        searcher_args = self._retrieve_args(parsed_searcher)
+        searcher_args = self._retrieve_args(parsed_searcher, **kwargs)
         initialized_searcher = parsed_searcher(**searcher_args)
-        return initialized_searcher
+        search_alg = ConcurrencyLimiter(
+            searcher=initialized_searcher, 
+            max_concurrent=2,
+            batch=False
+        )
+        return search_alg
 
 
     def _initialize_trial_executor(self):
@@ -250,6 +260,7 @@ class RayTuneTuner(BaseTuner):
         configured_search_space = self._initialize_search_space(search_space)
 
         config = {
+            "producer": self.producer,
             "collab_id": collab_id,
             "project_id": project_id,
             "expt_id": expt_id,
@@ -280,7 +291,7 @@ class RayTuneTuner(BaseTuner):
             **{**kwargs, **tuning_params}
         )
 
-        configured_searcher = self._initialize_trial_searcher(
+        search_algorithm = self._initialize_trial_searcher(
             searcher_str=searcher,
             **{**kwargs, **tuning_params}
         )
@@ -291,7 +302,7 @@ class RayTuneTuner(BaseTuner):
             config=config, 
             resources_per_trial=configured_resources,
             scheduler=configured_scheduler,
-            search_alg=configured_searcher,
+            search_alg=search_algorithm,
             **tuning_params
         )
 

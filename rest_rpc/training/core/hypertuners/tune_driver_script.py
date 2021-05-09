@@ -30,17 +30,16 @@ from synarchive.connection import (
 )
 from synarchive.training import ModelRecords
 from synarchive.evaluation import ValidationRecords
-# from synmanager.train import TrainProducerOperator
-# from synmanager.evaluate import EvaluateProducerOperator
+from synmanager.train_operations import TrainProducerOperator
 # from synmanager.completed import CompletedConsumerOperator
 
 ##################
 # Configurations #
 ##################
 
-is_master = app.config['IS_MASTER']
+SUPPORTED_METRICS = ['accuracy', 'roc_auc_score', 'pr_auc_score', 'f_score']
 
-grid_idx = app.config['GRID']
+is_cluster = app.config['IS_CLUSTER']
 
 db_path = app.config['DB_PATH']
 run_records = RunRecords(db_path=db_path)
@@ -63,7 +62,8 @@ optim_run_template = Template(optim_prefix + "$id")
 # Functions #
 #############
 
-def run_basic_federated_cycle(
+def run_distributed_federated_cycle(
+    producer: TrainProducerOperator,
     collab_id: str,
     project_id: str,
     expt_id: str,
@@ -92,97 +92,84 @@ def run_basic_federated_cycle(
         verbose (bool): Toggles if logging will be started in verbose mode
         **params: Hyperparameter set to train experiment model on
     """
-    # Retrieve registered participants' metadata under specified project
-    registrations = registration_records.read_all(
-        filter={'collab_id': collab_id, 'project_id': project_id}
-    )
-
-    # Consume a grid for running current federated combination
-    all_grids = rpc_formatter.extract_grids(registrations)
-    allocated_grid = all_grids[grid_idx]
-
     # Retrieve specific project
-    retrieved_project = project_records.read(
-        collab_id=collab_id,
-        project_id=project_id
-    )
+    project_keys = {'collab_id': collab_id, 'project_id': project_id}
+    retrieved_project = project_records.read(**project_keys)
     project_action = retrieved_project['action']
 
     # Retrieve specific experiment 
-    retrieved_expt = expt_records.read(
-        collab_id=collab_id,
-        project_id=project_id, 
-        expt_id=expt_id
-    )
-
+    expt_keys = {**project_keys, 'expt_id': expt_id}
+    retrieved_expt = expt_records.read(**expt_keys)
+    
     # Create an optimisation run under specified experiment for current project
     optim_run_id = optim_run_template.safe_substitute(
         {'id': optim_prefix + str(uuid.uuid4())}
     )
-    
-    keys = {
-        'collab_id': collab_id,
-        'project_id': project_id, 
-        'expt_id': expt_id, 
-        'run_id': optim_run_id
-    }
-    
-    run_records.create(**keys, details=params)
-    new_optim_run = run_records.read(**keys)
+    cycle_keys ={**expt_keys, 'run_id': optim_run_id}
+    run_records.create(**cycle_keys, details=params)
+    new_optim_run = run_records.read(**cycle_keys)
 
-    # Train on experiment-run combination
-    results = execute_combination_training(
-        keys=keys,
+    optim_key, optim_kwargs = rpc_formatter.enumerate_federated_conbinations(
         action=project_action,
-        grid=allocated_grid,
-        experiment=retrieved_expt,
-        run=new_optim_run,
+        experiments=[retrieved_expt],
+        runs=[new_optim_run],
         auto_align=auto_align,
         dockerised=dockerised,
         log_msgs=log_msgs,
         verbose=verbose
+    ).items().pop()
+
+    # Submit parameters of federated combination to job queue
+    producer.process(
+        process='optimize',   # operations filter for MQ consumer
+        combination_key=optim_key,
+        combination_params=optim_kwargs
     )
 
-    # Archive results in database
-    model_records.create(**keys, details=results)
+    ###########################
+    # Implementation Footnote #
+    ###########################
 
-    # Calculate validation statistics for experiment-run combination
+    # [Cause]
+    # PySyft Grids cannot host more than 1 federated cycle at at time. Hence, 
+    # to allow for active grid control, all optimization cycles are to be 
+    # channelled into a message queue.
+
+    # [Problems]
+    # In order for Ray.Tune to invoke its hyperparameter/scheduling 
+    # capabilities, it can only detect statistics from within its own sessions,
+    # which refers only to the direct function instances called from executing
+    # `tune.run()`. The queue cannot be bypassed by using Ray Nodes, since
+    # there may be cases where optimization runs are ran alongside other 
+    # training/evaluation jobs, causing the problem of conflicting grids.
+
+    # [Solution]
+    # Since jobs will perform archival processes as well, Director is to wait
+    # until statistics for a job exists in the archive before continuing.
+
+    registrations = registration_records.read_all(filter=project_keys)
     participants = [record['participant']['id'] for record in registrations]
-    validation_stats = execute_combination_inference(
-        keys=keys,
-        action=project_action,
-        grid=allocated_grid,
-        participants=participants,
-        experiment=retrieved_expt,
-        run=new_optim_run,
-        metas=['evaluate'],
-        auto_align=auto_align,
-        dockerised=dockerised,
-        log_msgs=log_msgs,
-        verbose=verbose,
-        version=None # defaults to final state of federated grid
-    )
-
-    combination_key = (collab_id, project_id, expt_id, optim_run_id)
 
     grouped_statistics = {}
-    for participant_id, inference_stats in validation_stats.items():
+    while participants:
 
-        # Store output metadata into database
-        worker_key = (participant_id,) + combination_key
-        validation_records.create(*worker_key, details=inference_stats)
+        participant_id = participants.pop(0)
+        worker_keys = [participant_id] + optim_key
+        inference_stats = validation_records.read(*worker_keys)
 
-        # Culminate into collection of metrics
-        supported_metrics = ['accuracy', 'roc_auc_score', 'pr_auc_score', 'f_score']
-        for metric_opt in supported_metrics:
+        # Archival for current participant is completed
+        if inference_stats:
 
-            metric_collection = grouped_statistics.get(metric_opt, [])
-            curr_metrics = inference_stats['evaluate']['statistics'][metric_opt]
-            metric_collection.append(curr_metrics)
-            grouped_statistics[metric_opt] = metric_collection
+            # Culminate into collection of metrics
+            for metric_opt in SUPPORTED_METRICS:
+                metric_collection = grouped_statistics.get(metric_opt, [])
+                curr_metrics = inference_stats['evaluate']['statistics'][metric_opt]
+                metric_collection.append(curr_metrics)
+                grouped_statistics[metric_opt] = metric_collection
 
-    # Log all statistics to MLFlow
-    mlf_logger.log(accumulations={combination_key: validation_stats})
+        # Archival for current participant is still pending --> Postpone
+        else:
+            participants.append(participant_id)
 
     # Calculate average of all statistics as benchmarks for model performance
     process_nans = lambda x: [max(stat, 0) for stat in x]
@@ -194,12 +181,6 @@ def run_basic_federated_cycle(
         ]))
         for metric, metric_collection in grouped_statistics.items()
     }
-
-    import logging
-    logging.warn(f"---> avg_statistics: {avg_statistics}")
-
-    import time, random
-    time.sleep(random.randint(0,5))
 
     tune.report(**avg_statistics)
 
@@ -285,98 +266,24 @@ def run_basic_federated_cycle(
 #         print("resp_data: ", resp_data)  
 
 
-def run_cluster_federated_cycle(
-    collab_id: str,
-    project_id: str,
-    expt_id: str,
-    metric: str,
-    auto_align: bool = True,
-    dockerised: bool = True, 
-    log_msgs: bool = True, 
-    verbose: bool = True,
-    **params
-):
-    """
-    """
-
-    def start_hp_training():
-        """
-        """
-        # Retrieve registered participants' metadata under specified project
-        registrations = registration_records.read_all(
-            filter={'collab_id': collab_id, 'project_id': project_id}
-        )
-
-        # Consume a grid for running current federated combination
-        all_grids = rpc_formatter.extract_grids(registrations)
-        allocated_grid = all_grids[grid_idx]
-
-        # Retrieve specific project
-        retrieved_project = project_records.read(
-            collab_id=collab_id,
-            project_id=project_id
-        )
-        project_action = retrieved_project['action']
-
-        # Retrieve specific experiment 
-        retrieved_expt = expt_records.read(
-            collab_id=collab_id,
-            project_id=project_id, 
-            expt_id=expt_id
-        )
-
-        # Create an optimisation run under specified experiment for current project
-        optim_run_id = optim_run_template.safe_substitute(
-            {'id': optim_prefix + str(uuid.uuid4())}
-        )
-        
-        keys = {
-            'collab_id': collab_id,
-            'project_id': project_id, 
-            'expt_id': expt_id, 
-            'run_id': optim_run_id
-        }
-        
-        run_records.create(**keys, details=params)
-        new_optim_run = run_records.read(**keys)
-
-        # Train on experiment-run combination
-        results = execute_combination_training(
-            keys=keys,
-            action=project_action,
-            grid=allocated_grid,
-            experiment=retrieved_expt,
-            run=new_optim_run,
-            auto_align=auto_align,
-            dockerised=dockerised,
-            log_msgs=log_msgs,
-            verbose=verbose
-        )
-
-        # Archive results in database
-        model_records.create(**keys, details=results)
-
-
-    def start_hp_validation():
-        """
-        """
-        pass
-
-
-
+# def execute_optimization_job(
+#     combination_key: List[str],
+#     combination_params: Dict[str, Union[str, int, float, list, dict]]
+# ) -> List[Document]:
 
 
 def tune_proc(config: dict, checkpoint_dir: str):
+    """ Encapsulating function for Ray.Tune to execute hyperparameter tuning.
+        Parameters are dictated by Ray.Tune.
+
+    Args:
+        config (dict): 
+        checkpoint_dir (str):
     """
-    """
+    if not is_cluster:
+        raise RuntimeError("Optimization is only active in cluster mode!")
 
-    if is_master:
-        return run_basic_federated_cycle(**config)
-
-    else:
-        return run_cluster_federated_cycle(**config)
-
-  
+    return run_distributed_federated_cycle(**config)
 
 
 # def send_evaluate_msg(project_id, expt_id, run_id, participant_id=None):

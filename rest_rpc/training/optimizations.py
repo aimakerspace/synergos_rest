@@ -7,10 +7,14 @@
 # Generic/Built-in
 import os
 import time
+import uuid
+from string import Template
+from typing import Dict, List, Union, Any
 
 # Libs
 from flask import request
 from flask_restx import Namespace, Resource, fields
+from tinydb.database import Document
 
 # Custom
 from rest_rpc import app
@@ -20,9 +24,21 @@ from rest_rpc.training.core.hypertuners import (
     RayTuneTuner, 
     optim_prefix
 )
+from rest_rpc.training.core.utils import RPCFormatter
+from rest_rpc.training.core.server import execute_combination_training
+from rest_rpc.evaluation.core.server import execute_combination_inference
 # from rest_rpc.evaluation.validations import val_output_model
-from synarchive.connection import RunRecords
-from synarchive.evaluation import ValidationRecords
+from rest_rpc.evaluation.core.utils import MLFlogger
+from synarchive.connection import (
+    CollaborationRecords,
+    ProjectRecords,
+    ExperimentRecords,
+    RunRecords,
+    RegistrationRecords
+)
+from synarchive.training import ModelRecords
+from synarchive.evaluation import ValidationRecords, MLFRecords
+from synmanager.train_operations import TrainProducerOperator
 
 ##################
 # Configurations #
@@ -39,13 +55,29 @@ ns_api = Namespace(
     description='API to faciliate hyperparameter tuning in a federated grid.'
 )
 
+grid_idx = app.config['GRID']
+
 is_cluster = app.config['IS_CLUSTER']
 
 out_dir = app.config['OUT_DIR']
 
 db_path = app.config['DB_PATH']
+collab_records = CollaborationRecords(db_path=db_path)
+project_records = ProjectRecords(db_path=db_path)
+expt_records = ExperimentRecords(db_path=db_path)
 run_records = RunRecords(db_path=db_path)
+mlf_records = MLFRecords(db_path=db_path)
+registration_records = RegistrationRecords(db_path=db_path)
+model_records = ModelRecords(db_path=db_path)
 validation_records = ValidationRecords(db_path=db_path)
+
+rpc_formatter = RPCFormatter()
+
+mlf_logger = MLFlogger()
+
+# Template for generating optimisation run ID
+optim_prefix = "optim_run_"
+optim_run_template = Template(optim_prefix + "$id")
 
 logging = app.config['NODE_LOGGER'].synlog
 logging.debug("training/optimizations.py logged", Description="No Changes")
@@ -144,6 +176,66 @@ val_output_model = ns_api.inherit(
 )
 
 payload_formatter = TopicalPayload(SUBJECT, ns_api, val_output_model)
+
+########
+# Jobs #
+########
+
+def execute_optimization_job(
+    combination_key: List[str],
+    combination_params: Dict[str, Union[str, int, float, list, dict]]
+) -> List[Document]:
+    """ Encapsulated job function to be compatible for queue integrations.
+        Executes model training & inference for a specified federated cycle, 
+        to optimize, and stores all outputs for subsequent use.
+
+    Args:
+        combination_key (dict): Composite IDs of a federated combination
+        combination_params (dict): Initializing parameters for an optimization job
+    Returns:
+        Optimized validation statistics (list(Document))    
+    """
+    collab_id, project_id, expt_id, run_id = combination_key
+    
+    # Retrieve registered participants' metadata under specified project
+    registrations = registration_records.read_all(
+        filter={'collab_id': collab_id, 'project_id': project_id}
+    )
+
+    # Consume a grid for running current federated combination
+    usable_grids = rpc_formatter.extract_grids(registrations)
+    selected_grid = usable_grids[grid_idx]
+
+    project_keys = {'collab_id': collab_id, 'project_id': project_id}
+    expt_keys = {**project_keys, 'expt_id': expt_id}
+    cycle_keys = {**expt_keys, 'run_id': run_id}
+
+    # Train on experiment-run combination
+    results = execute_combination_training(
+        grid=selected_grid,
+        **combination_params
+    ) 
+
+    # Archive results in database
+    model_records.create(**cycle_keys, details=results)
+
+    # Calculate validation statistics for experiment-run combination
+    participants = [record['participant']['id'] for record in registrations]
+    validation_stats = execute_combination_inference(
+        grid=selected_grid,
+        participants=participants,  # perform validation on all participants
+        metas=['evaluate'],         # only perform validation on validation set
+        version=None,               # defaults to final state of federated grid
+        **combination_params
+    ) 
+    
+    # Store output metadata into database
+    for participant_id, inference_stats in validation_stats.items():
+        worker_keys = [participant_id] + combination_key
+        validation_records.create(*worker_keys, details=inference_stats)
+
+    # Log all statistics to MLFlow
+    mlf_logger.log(accumulations={tuple(combination_key): validation_stats})
 
 #############
 # Resources #
@@ -320,6 +412,15 @@ class Optimizations(Resource):
                 message="Optimization is only active in a Synergos cluster, and is unsupported in Synergos Basic."
             )
 
+        # Retrieve all connectivity settings for all Synergos components
+        retrieved_collaboration = collab_records.read(collab_id=collab_id)
+
+        queue_host = retrieved_collaboration['mq_host']
+        queue_port = retrieved_collaboration['mq_port']
+        producer = TrainProducerOperator(host=queue_host, port=queue_port)
+        
+        producer.connect()
+
         # Populate hyperparameter tuning parameters
         tuning_params = request.json
 
@@ -335,7 +436,10 @@ class Optimizations(Resource):
         try:
             backend = tuning_params.get('backend', "tune")
             
-            hypertuner = HYPERTUNER_BACKENDS[backend](log_dir=optim_log_dir)
+            hypertuner = HYPERTUNER_BACKENDS[backend](
+                producer=producer,
+                log_dir=optim_log_dir,
+            )
             hypertuner.tune(
                 collab_id=collab_id,
                 project_id=project_id, 
@@ -362,6 +466,9 @@ class Optimizations(Resource):
                 code=417,
                 message=f"Specified backend '{backend}' is not supported!"
             )
+
+        finally:
+            producer.disconnect()
 
         retrieved_validations = validation_records.read_all(
             filter=request.view_args
