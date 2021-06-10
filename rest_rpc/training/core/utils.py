@@ -505,7 +505,7 @@ class RPCFormatter:
 
                 if expt_id == curr_expt_id:
 
-                    combination_key = [collab_id, project_id, expt_id, run_id]
+                    combination_key = (collab_id, project_id, expt_id, run_id)
                     combination_params = {
                         'keys': run_key,
                         'action': action,
@@ -527,7 +527,10 @@ class RPCFormatter:
 ##########################################
 
 class Orchestrator:
-    """
+    """ Base class on which any communicating module is built upon. Such 
+        modules interact with API abstractions hosted on the worker nodes,
+        broadcasting instructions from the TTP to trigger procedures to be
+        executed by the remote workers.
 
     Attributes:
         __rpc_formatter (RPCFormatter): Formatter for structured data in REST-RPC
@@ -539,13 +542,15 @@ class Orchestrator:
     # Helpers #
     ###########
 
-    def parse_keys(self, node_info: dict) -> Dict[str, str]:
-        """
+    def parse_keys(self, node_info: dict) -> List[str]:
+        """ Extract essential keys from a specifed node archive
 
         Args:
-            node_info (dict):
+            node_info (dict): Node metadata as a formatted archive
         Returns:
-            
+            ID of related collaboration (str)
+            ID of related project
+            ID of involved participant
         """
         node_keys = node_info.get('keys')
         collab_id = node_keys.get('collab_id')
@@ -555,45 +560,52 @@ class Orchestrator:
 
 
     def parse_action(self, node_info: dict) -> str:
-        """
+        """ Extract specified action from a specified node archive. The action
+            refers to an ML operation type. Current actions support include:
+            1) "regress"
+            2) "classify"
 
         Args:
-            node_info (dict):
+            node_info (dict): Node metadata as a formatted archive
         Returns:
-            
+            ML action type (str)
         """
         return node_info.get('action')
 
 
     def parse_rest_info(self, node_info: dict) -> dict:
-        """
+        """ Extract required metadata from a specified node archive for
+            establishing a connection with REST services on remote worker nodes.
 
         Args:
-            node_info (dict):
+            node_info (dict): Node metadata as a formatted archive
         Returns:
-            
+            REST connection metadata (dict) 
         """
         return node_info.get('rest')
 
     
     def parse_syft_info(self, node_info: dict) -> dict:
-        """
+        """ Extract required metadata from a specified node archive for
+            establishing websocket connections between a remote PySyft WSSW &
+            a local WSCW.
 
         Args:
-            node_info (dict):
+            node_info (dict): Node metadata as a formatted archive
         Returns:
-            
+            PySyft websocket connection metadata (dict) 
         """
         return node_info.get('syft')
 
 
     def parse_tags(self, node_info: dict) -> dict:
-        """
+        """ Extract required data tags to locate datasets relevant to the 
+            current project of a specified collaboration.
 
         Args:
-            node_info (dict):
+            node_info (dict): Node metadata as a formatted archive
         Returns:
-            
+            Stripped tags (dict)
         """
         node_relations = node_info.get('relations')
         relevant_tags = node_relations['Tag'][0]
@@ -606,13 +618,14 @@ class Orchestrator:
         node_info: dict, 
         auto_align: bool = True
     ) -> dict:
-        """
+        """ Extract and processes alignment indexes for subsequent use in the 
+            various phases of the federated cycle (i.e. training & inference).
 
         Args:
-            node_info (dict):
+            node_info (dict): Node metadata as a formatted archive
             auto_align (bool): Toggles if dynamic alignment will be applied
         Returns:
-
+            Stripped Alignments (dict)
         """
         node_relations = node_info.get('relations')
         node_tags = self.parse_tags(node_info) 

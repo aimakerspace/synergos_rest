@@ -45,10 +45,18 @@ logging.debug("connection/participants.py logged", Description="No Changes")
 # Models - Used for marshalling (i.e. moulding responses) #
 ###########################################################
 
+social_fields = fields.Wildcard(fields.String())
+social_model = ns_api.model(name="socials", model={"*": social_fields})
+
 participant_model = ns_api.model(
     name="participant",
     model={
-        'id': fields.String(required=True)
+        'id': fields.String(required=True),
+        'category': fields.List(fields.String()),
+        'summary': fields.String(),
+        'phone': fields.String(),
+        'email': fields.String(),
+        'socials': fields.Nested(social_model)
     }
 )
 
