@@ -532,7 +532,7 @@ class Predictions(Resource):
             for predict_key, predict_kwargs in predict_combinations.items():
                 
                 retrieved_combination_predictions = execute_prediction_job(
-                    combination_key=predict_key, 
+                    combination_key=list(predict_key), 
                     combination_params=predict_kwargs
                 )
 

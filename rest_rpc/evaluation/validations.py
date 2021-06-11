@@ -391,7 +391,7 @@ class Validations(Resource):
             for valid_key, valid_kwargs in valid_combinations.items():
                 
                 retrieved_combination_validations = execute_validation_job(
-                    combination_key=valid_key, 
+                    combination_key=list(valid_key), 
                     combination_params=valid_kwargs
                 )
 
