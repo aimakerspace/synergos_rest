@@ -946,8 +946,6 @@ class Governor(Orchestrator):
         data_tags = self.parse_tags(node_info)
         data_alignments = self.parse_alignments(node_info, self.auto_align)
 
-        logging.warn(f"---> data alignments: {data_alignments}")
-
         payload = {
             'action': ml_action,
             'tags': data_tags,

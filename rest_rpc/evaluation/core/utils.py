@@ -129,7 +129,7 @@ class Analyser(Orchestrator):
 
         # Trigger remote inference by posting alignments & ID mappings to 
         # `Predict` route in worker
-        resp_inference_data, _ = await self.instruct(
+        resp_inference_data, status_code = await self.instruct(
             command='post', 
             url=destination_url, 
             payload=payload

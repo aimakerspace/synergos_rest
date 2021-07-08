@@ -82,6 +82,8 @@ pred_input_model = ns_api.model(
     model={
         'auto_align': fields.Boolean(default=True, required=True),
         'dockerised': fields.Boolean(default=False, required=True),
+        'verbose': fields.Boolean(default=False),
+        'log_msgs': fields.Boolean(default=False),
         'tags': fields.Nested(model=prediction_tag_model, skip_none=True)
     }
 )

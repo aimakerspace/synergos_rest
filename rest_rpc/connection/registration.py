@@ -77,6 +77,9 @@ incentive_model = ns_api.model(
     model={"*": incentives_field}
 )
 
+social_fields = fields.Wildcard(fields.String())
+social_model = ns_api.model(name="socials", model={"*": social_fields})
+
 registration_model = ns_api.inherit(
     "registration",
     connectivity_model,
@@ -126,7 +129,12 @@ registration_model = ns_api.inherit(
             ns_api.model(
                 name="registered_participant",
                 model={
-                    'id': fields.String(required=True)
+                    'id': fields.String(required=True),
+                    'category': fields.List(fields.String()),
+                    'summary': fields.String(),
+                    'phone': fields.String(),
+                    'email': fields.String(),
+                    'socials': fields.Nested(social_model)
                 }
             ),
             required=True

@@ -64,11 +64,12 @@ def execute_combination_inference(
     metas: list = ['train', 'evaluate', 'predict'],
     auto_align: bool = True,
     dockerised: bool = True, 
-    log_msgs: bool = True, 
-    verbose: bool = True,
+    log_msgs: bool = False, 
+    verbose: bool = False,
     version: Tuple[str, str] = None
 ) -> dict:
-    """ Trains a model corresponding to a SINGLE experiment-run combination
+    """ Infers results using a model corresponding to a SINGLE experiment-run 
+        combination
 
     Args:
         keys (dict): Relevant Project ID, Expt ID & Run ID
@@ -92,7 +93,6 @@ def execute_combination_inference(
 
     def infer_combination():
 
-        logging.warn(f"---> Participants declared: {participants}")
         # Create worker representation for local machine as TTP
         ttp = connect_to_ttp(log_msgs=log_msgs, verbose=verbose)
 
@@ -143,8 +143,6 @@ def execute_combination_inference(
                 for participant in participants
             }
 
-        logging.warn(f"participant_interference: {participants_inferences}")
-
         # Close WSCW local objects once training process is completed (if possible)
         # (i.e. graceful termination)
         terminate_connections(ttp=ttp, workers=workers)
@@ -181,7 +179,6 @@ def execute_combination_inference(
         **keys
     )
     polled_stats = analyser.infer(grid=grid)
-    logging.warn(f"---> polled stats: {polled_stats}")
 
     logging.debug(
         f"Evaluation - Polled statistics tracked.", 

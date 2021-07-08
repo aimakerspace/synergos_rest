@@ -261,6 +261,7 @@ class Tag(Resource):
             project_id=project_id,
             participant_id=participant_id
         )
+        logging.info(f"{retrieved_tag}, {collab_id}, {project_id}, {participant_id}")
         deleted_tag = tag_records.delete(
             collab_id=collab_id,
             project_id=project_id,

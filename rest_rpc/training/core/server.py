@@ -450,10 +450,10 @@ def execute_combination_training(
     action: str,
     experiment: dict, 
     run: dict, 
-    auto_align: bool,
-    dockerised: bool, 
-    log_msgs: bool, 
-    verbose: bool
+    auto_align: bool = True,
+    dockerised: bool = True, 
+    log_msgs: bool = False, 
+    verbose: bool = False,
 ):
     """ Trains a model corresponding to a SINGLE experiment-run combination
 
