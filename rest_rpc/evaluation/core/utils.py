@@ -167,27 +167,31 @@ class Analyser(Orchestrator):
         Returns:
             All participants' statistics (dict)
         """
-        sorted_node_info = sorted(
-            grid, 
-            key=lambda x: self.parse_syft_info(x).get('id')
-        )
-        sorted_inferences = sorted(self.inferences.items(), key=lambda x: x[0])
 
-        logging.debug(
-            "Sorted inferences tracked.",
-            sorted_inferences=sorted_inferences,
-            ID_path=SOURCE_FILE,
-            ID_class=Analyser.__name__,
-            ID_function=Analyser._collect_all_stats.__name__
-        )
+        ###########################
+        # Implementation Footnote #
+        ###########################
+
+        # [Causes]
+        # Node info retrieved is asynmetric as compared to input inferences.
+
+        # [Problems]
+        # Zipping causes misallocation of dataset inferences to the wrong
+        # servers, resulting in a "ValueError: Found input variables with 
+        # inconsistent numbers of samples: [N1, N2]", since prediction counts 
+        # obtained are not aligned with label counts in the remote servers 
+
+        # [Solution]
+        # Pair things up via manual matching
 
         mapped_pairs = [
-            (record, inferences) 
-            for record, (_, inferences) in zip(
-                sorted_node_info, 
-                sorted_inferences
-            )
+            (record, inferences)
+            for worker_id, inferences in self.inferences.items()
+            for record in grid
+            if self.parse_syft_info(record).get('id') == worker_id
         ]
+
+        logging.debug(f"Mapped pairs: {mapped_pairs}")
 
         all_statistics = {}
         for future in asyncio.as_completed(

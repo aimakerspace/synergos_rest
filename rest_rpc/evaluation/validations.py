@@ -249,12 +249,12 @@ class Validations(Resource):
             )
 
             logging.info(
-                "Participant '{}' >|< Collaboration '{}' > Project '{}' > Experiment '{}' > Run '{}' >|< Validations: Bulk record retrieval successful!".format(
-                    participant_id, collab_id, project_id, expt_id, run_id
+                "Collaboration '{}' > Project '{}' > Experiment '{}' > Run '{}' >|< Validations: Bulk record retrieval successful!".format(
+                    collab_id, project_id, expt_id, run_id
                 ),
                 code=200, 
-                description="Validations for participant '{}' under collaboration '{}''s project '{}' using experiment '{}' and run '{}' was successfully retrieved!".format(
-                    participant_id, collab_id, project_id, expt_id, run_id
+                description="Validations for participants under collaboration '{}''s project '{}' using experiment '{}' and run '{}' was successfully retrieved!".format(
+                    collab_id, project_id, expt_id, run_id
                 ),
                 ID_path=SOURCE_FILE,
                 ID_class=Validations.__name__, 
@@ -266,8 +266,8 @@ class Validations(Resource):
 
         else:
             logging.error(
-                "Participant '{}' >|< Collaboration '{}' > Project '{}' > Experiment '{}' > Run '{}' >|< Validations: Bulk record retrieval failed!".format(
-                    participant_id, collab_id, project_id, expt_id, run_id
+                "Collaboration '{}' > Project '{}' > Experiment '{}' > Run '{}' >|< Validations: Bulk record retrieval failed!".format(
+                    collab_id, project_id, expt_id, run_id
                 ),
                 code=404, 
                 description=f"Predictions do not exist for specified keyword filters!", 
@@ -406,10 +406,12 @@ class Validations(Resource):
         )
 
         logging.info(
-            "Participant '{}' >|< Collaboration '{}' > Project '{}' > Experiment '{}' > Run '{}' >|< Validations: Record creation successful!".format(
-                participant_id, collab_id, project_id, expt_id, run_id
+            "Collaboration '{}' > Project '{}' > Experiment '{}' > Run '{}' >|< Validations: Record creation successful!".format(
+                collab_id, project_id, expt_id, run_id
             ),
-            description=f"Validations for participant '{participant_id}' under project '{project_id}' using experiment '{expt_id}' and run '{run_id}' was successfully collected!",
+            description="Validations for participants under collaboration '{}''s project '{}' using experiment '{}' and run '{}' was successfully collected!".format(
+                collab_id, project_id, expt_id, run_id
+            ),
             code=201, 
             ID_path=SOURCE_FILE,
             ID_class=Validations.__name__, 
