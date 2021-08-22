@@ -51,13 +51,46 @@ logging.debug("connection/collaborations.py logged", Description="No Changes")
 # Models - Used for marshalling (i.e. moulding responses) #
 ###########################################################
 
-logger_ports_model = ns_api.model(
-    name="logger_ports",
+base_ports_model = ns_api.model(
+    name="base_ports",
     model={
-        'sysmetrics': fields.Integer(),
-        'director': fields.Integer(),
-        'ttp': fields.Integer(),
-        'worker': fields.Integer(),
+        'main': fields.Integer(required=True, skip_none=True),
+        'ui': fields.Integer(skip_none=True)
+    }
+)
+
+base_connection_model = ns_api.model(
+    name="connection",
+    model={
+        'host': fields.String(required=True, skip_none=True),
+        'ports': fields.Nested(model=base_ports_model, skip_none=True),
+        'secure': fields.Boolean(required=True, skip_none=True)
+    }
+)
+
+logger_ports_model = ns_api.inherit(
+    "logger_ports",
+    base_ports_model,
+    {
+        'sysmetrics': fields.Integer(required=True, skip_none=True),
+        'director': fields.Integer(required=True, skip_none=True),
+        'ttp': fields.Integer(required=True, skip_none=True),
+        'worker': fields.Integer(required=True, skip_none=True),
+    }
+)
+
+# logs_model =  ns_api.inherit(
+#     "logs_connection",
+#     base_connection_model,
+#     {'ports': fields.Nested(model=logger_ports_model)}  # override defaults
+# )
+
+logs_model =  ns_api.model(
+    name="logs_connection",
+    model={
+        'host': fields.String(required=True, skip_none=True),
+        'ports': fields.Nested(model=logger_ports_model),
+        'secure': fields.Boolean(required=True, skip_none=True)
     }
 )
 
@@ -65,26 +98,15 @@ collab_model = ns_api.model(
     name="collaboration",
     model={
         # Catalogue Connection
-        'catalogue_host': fields.String(),
-        'catalogue_port': fields.Integer(),
+        'catalogue': fields.Nested(model=base_connection_model),
         # Logger Connection
-        'logger_host': fields.String(),
-        'logger_ports': fields.Nested(
-            model=logger_ports_model,
-            skip_none=True
-        ),
+        'logs': fields.Nested(model=logs_model),
         # Meter Connection
-        'meter_host': fields.String(),
-        'meter_port': fields.Integer(),
+        'meter': fields.Nested(model=base_connection_model),
         # MLOps Connection
-        'mlops_host': fields.String(),
-        'mlops_port': fields.Integer(),
+        'mlops': fields.Nested(model=base_connection_model),
         # MQ Connection
-        'mq_host': fields.String(),
-        'mq_port': fields.Integer(),
-        # UI Connection
-        'ui_host': fields.String(),
-        'ui_port': fields.Integer()
+        'mq': fields.Nested(model=base_connection_model)
     }
 )
 
