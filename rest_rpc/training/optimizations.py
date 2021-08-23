@@ -415,8 +415,9 @@ class Optimizations(Resource):
         # Retrieve all connectivity settings for all Synergos components
         retrieved_collaboration = collab_records.read(collab_id=collab_id)
 
-        queue_host = retrieved_collaboration['mq_host']
-        queue_port = retrieved_collaboration['mq_port']
+        queue_info = retrieved_collaboration['mq']
+        queue_host = queue_info['host']
+        queue_port = queue_info['ports']['main']
         producer = TrainProducerOperator(host=queue_host, port=queue_port)
         
         producer.connect()

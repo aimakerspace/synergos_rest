@@ -40,6 +40,43 @@ logging.debug("connection/registration.py logged", Description="No Changes")
 # Models - Used for marshalling (i.e. moulding responses) #
 ###########################################################
 
+base_ports_model = ns_api.model(
+    name="base_ports",
+    model={
+        'main': fields.Integer(),
+        'ui': fields.Integer()
+    }
+)
+
+base_connection_model = ns_api.model(
+    name="connection",
+    model={
+        'host': fields.String(),
+        'ports': fields.Nested(model=base_ports_model, allow_null=True),
+        'secure': fields.Boolean()
+    }
+)
+
+logger_ports_model = ns_api.inherit(
+    "logger_ports",
+    base_ports_model,
+    {
+        'sysmetrics': fields.Integer(),
+        'director': fields.Integer(),
+        'ttp': fields.Integer(),
+        'worker': fields.Integer(),
+    }
+)
+
+logs_model =  ns_api.model(
+    name="logs_connection",
+    model={
+        'host': fields.String(),
+        'ports': fields.Nested(model=logger_ports_model, allow_null=True),
+        'secure': fields.Boolean()
+    }
+)
+
 channel_model = ns_api.model(
     name="channel",
     model={
@@ -61,16 +98,6 @@ connectivity_model = ns_api.model(
     }
 )
 
-logger_ports_model = ns_api.model(
-    name="logger_ports",
-    model={
-        'sysmetrics': fields.Integer(),
-        'director': fields.Integer(),
-        'ttp': fields.Integer(),
-        'worker': fields.Integer(),
-    }
-)
-
 incentives_field = fields.Wildcard(fields.Raw()) # tentative
 incentive_model = ns_api.model(
     name="registered_incentives",
@@ -88,36 +115,29 @@ registration_model = ns_api.inherit(
             ns_api.model(
                 name="registered_collaboration",
                 model={
-                    'catalogue_host': fields.String(),
-                    'catalogue_port': fields.Integer(),
+                    # Catalogue Connection
+                    'catalogue': fields.Nested(model=base_connection_model, skip_none=True),
                     # Logger Connection
-                    'logger_host': fields.String(),
-                    'logger_ports': fields.Nested(
-                        model=logger_ports_model,
-                        required=True
-                    ),
+                    'logs': fields.Nested(model=logs_model, skip_none=True),
                     # Meter Connection
-                    'meter_host': fields.String(),
-                    'meter_port': fields.Integer(),
+                    'meter': fields.Nested(model=base_connection_model, skip_none=True),
                     # MLOps Connection
-                    'mlops_host': fields.String(),
-                    'mlops_port': fields.Integer(),
+                    'mlops': fields.Nested(model=base_connection_model, skip_none=True),
                     # MQ Connection
-                    'mq_host': fields.String(),
-                    'mq_port': fields.Integer(),
-                    # UI Connection
-                    'ui_host': fields.String(),
-                    'ui_port': fields.Integer()
+                    'mq': fields.Nested(model=base_connection_model, skip_none=True)
                 }
             ),
             required=True
         ),
+
         'project': fields.Nested(
             ns_api.model(
                 name="registered_project",
                 model={
+                    'action': fields.String(required=True),
                     'incentives': fields.Nested(
                         model=incentive_model,
+                        required=True,
                         skip_none=True
                     ),
                     'start_at': fields.String()
@@ -125,16 +145,17 @@ registration_model = ns_api.inherit(
             ),
             required=True
         ),
+
         'participant': fields.Nested(
             ns_api.model(
                 name="registered_participant",
                 model={
                     'id': fields.String(required=True),
-                    'category': fields.List(fields.String()),
+                    'category': fields.List(fields.String(), default=[]),
                     'summary': fields.String(),
                     'phone': fields.String(),
                     'email': fields.String(),
-                    'socials': fields.Nested(social_model)
+                    'socials': fields.Nested(social_model, skip_none=True)
                 }
             ),
             required=True

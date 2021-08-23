@@ -59,13 +59,9 @@ incentive_model = ns_api.model(
 project_model = ns_api.model(
     name="project",
     model={
-        'action': fields.String(),
+        'action': fields.String(required=True),
+        'incentives': fields.Nested(model=incentive_model, skip_none=True),
         'universe_alignment': fields.List(fields.String),
-        'incentives': fields.Nested(
-            model=incentive_model,
-            #required=True,
-            skip_none=True
-        ),
         'start_at': fields.String()
     }
 )

@@ -6,6 +6,7 @@
 
 # Generic/Built-in
 import os
+from typing import DefaultDict
 
 # Libs
 import jsonschema
@@ -54,17 +55,17 @@ logging.debug("connection/collaborations.py logged", Description="No Changes")
 base_ports_model = ns_api.model(
     name="base_ports",
     model={
-        'main': fields.Integer(required=True, skip_none=True),
-        'ui': fields.Integer(skip_none=True)
+        'main': fields.Integer(),
+        'ui': fields.Integer()
     }
 )
 
 base_connection_model = ns_api.model(
     name="connection",
     model={
-        'host': fields.String(required=True, skip_none=True),
-        'ports': fields.Nested(model=base_ports_model, skip_none=True),
-        'secure': fields.Boolean(required=True, skip_none=True)
+        'host': fields.String(),
+        'ports': fields.Nested(model=base_ports_model, allow_null=True),
+        'secure': fields.Boolean()
     }
 )
 
@@ -72,25 +73,19 @@ logger_ports_model = ns_api.inherit(
     "logger_ports",
     base_ports_model,
     {
-        'sysmetrics': fields.Integer(required=True, skip_none=True),
-        'director': fields.Integer(required=True, skip_none=True),
-        'ttp': fields.Integer(required=True, skip_none=True),
-        'worker': fields.Integer(required=True, skip_none=True),
+        'sysmetrics': fields.Integer(),
+        'director': fields.Integer(),
+        'ttp': fields.Integer(),
+        'worker': fields.Integer(),
     }
 )
-
-# logs_model =  ns_api.inherit(
-#     "logs_connection",
-#     base_connection_model,
-#     {'ports': fields.Nested(model=logger_ports_model)}  # override defaults
-# )
 
 logs_model =  ns_api.model(
     name="logs_connection",
     model={
-        'host': fields.String(required=True, skip_none=True),
-        'ports': fields.Nested(model=logger_ports_model),
-        'secure': fields.Boolean(required=True, skip_none=True)
+        'host': fields.String(),
+        'ports': fields.Nested(model=logger_ports_model, allow_null=True),
+        'secure': fields.Boolean()
     }
 )
 
@@ -98,15 +93,15 @@ collab_model = ns_api.model(
     name="collaboration",
     model={
         # Catalogue Connection
-        'catalogue': fields.Nested(model=base_connection_model),
+        'catalogue': fields.Nested(model=base_connection_model, skip_none=True),
         # Logger Connection
-        'logs': fields.Nested(model=logs_model),
+        'logs': fields.Nested(model=logs_model, skip_none=True),
         # Meter Connection
-        'meter': fields.Nested(model=base_connection_model),
+        'meter': fields.Nested(model=base_connection_model, skip_none=True),
         # MLOps Connection
-        'mlops': fields.Nested(model=base_connection_model),
+        'mlops': fields.Nested(model=base_connection_model, skip_none=True),
         # MQ Connection
-        'mq': fields.Nested(model=base_connection_model)
+        'mq': fields.Nested(model=base_connection_model, skip_none=True)
     }
 )
 

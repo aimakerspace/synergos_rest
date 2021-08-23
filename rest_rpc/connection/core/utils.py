@@ -79,7 +79,7 @@ class TopicalPayload:
         self.singular_model = namespace.inherit(
             "payload_single",
             payload_model,
-            {'data': fields.Nested(model, required=True, skip_none=True)}
+            {'data': fields.Nested(model, skip_none=True)}
         )
         self.plural_model = namespace.inherit(
             "payload_plural",

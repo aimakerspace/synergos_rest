@@ -56,7 +56,7 @@ participant_model = ns_api.model(
         'summary': fields.String(),
         'phone': fields.String(),
         'email': fields.String(),
-        'socials': fields.Nested(social_model)
+        'socials': fields.Nested(social_model, skip_none=True)
     }
 )
 
