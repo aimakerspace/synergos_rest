@@ -296,26 +296,44 @@ class Models(Resource):
         )
 
         if is_cluster:
-            # Submit parameters of federated combinations to job queue
-            queue_host = retrieved_collaboration['mq_host']
-            queue_port = retrieved_collaboration['mq_port']
-            train_producer = TrainProducerOperator(
-                host=queue_host, 
-                port=queue_port
-            )
 
-            train_producer.connect()
-
-            for train_key, train_kwargs in training_combinations.items():
-                train_producer.process(
-                    process='train',   # operations filter for MQ consumer
-                    combination_key=train_key,
-                    combination_params=train_kwargs
+            try:
+                # Submit parameters of federated combinations to job queue
+                queue_info = retrieved_collaboration['mq']
+                queue_host = queue_info['host']
+                queue_port = queue_info['ports']['main']
+                train_producer = TrainProducerOperator(
+                    host=queue_host, 
+                    port=queue_port
                 )
 
-            train_producer.disconnect()
+                train_producer.connect()
 
-            retrieved_models = []
+                for train_key, train_kwargs in training_combinations.items():
+                    train_producer.process(
+                        process='train',   # operations filter for MQ consumer
+                        combination_key=train_key,
+                        combination_params=train_kwargs
+                    )
+
+                train_producer.disconnect()
+
+                retrieved_models = []
+
+            except KeyError:
+                logging.error(
+                    "SynCluster mode attempted, but no queue was declared!",
+                    code=403,
+                    description="Synergos MQ is required for running cluster mode. Please deploy and declare your MQ info when creating a collaboration.",
+                    ID_path=SOURCE_FILE,
+                    ID_class=Models.__name__, 
+                    ID_function=Models.post.__name__,
+                    **request.view_args
+                )
+                ns_api.abort(
+                    code=403, 
+                    message="SynCluster mode attempted, but no queue was declared!"
+                )
 
         else:
             # Run federated combinations sequentially using selected grid

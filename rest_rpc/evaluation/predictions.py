@@ -507,26 +507,44 @@ class Predictions(Resource):
             predict_combinations.update(project_combinations)
 
         if is_cluster:
-            # Submit parameters of federated combinations to job queue
-            queue_host = retrieved_collaboration['mq_host']
-            queue_port = retrieved_collaboration['mq_port']
-            predict_producer = EvaluateProducerOperator(
-                host=queue_host, 
-                port=queue_port
-            )
 
-            predict_producer.connect()
-
-            for predict_key, predict_kwargs in predict_combinations.items():
-                predict_producer.process(
-                    process='predict',   # operations filter for MQ consumer
-                    combination_key=predict_key,
-                    combination_params=predict_kwargs
+            try:
+                # Submit parameters of federated combinations to job queue
+                queue_info = retrieved_collaboration['mq']
+                queue_host = queue_info['host']
+                queue_port = queue_info['ports']['main']
+                predict_producer = EvaluateProducerOperator(
+                    host=queue_host, 
+                    port=queue_port
                 )
 
-            predict_producer.disconnect()
-                
-            all_predictions = []
+                predict_producer.connect()
+
+                for predict_key, predict_kwargs in predict_combinations.items():
+                    predict_producer.process(
+                        process='predict',   # operations filter for MQ consumer
+                        combination_key=predict_key,
+                        combination_params=predict_kwargs
+                    )
+
+                predict_producer.disconnect()
+                    
+                all_predictions = []
+            
+            except KeyError:
+                logging.error(
+                    "SynCluster mode attempted, but no queue was declared!",
+                    code=403,
+                    description="Synergos MQ is required for running cluster mode. Please deploy and declare your MQ info when creating a collaboration.",
+                    ID_path=SOURCE_FILE,
+                    ID_class=Predictions.__name__, 
+                    ID_function=Predictions.post.__name__,
+                    **request.view_args
+                )
+                ns_api.abort(
+                    code=403, 
+                    message="SynCluster mode attempted, but no queue was declared!"
+                )
         
         else:
             # Run federated combinations sequentially using selected grid

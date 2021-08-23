@@ -364,27 +364,45 @@ class Validations(Resource):
         )
 
         if is_cluster:
-            # Submit parameters of federated combinations to job queue
-            queue_host = retrieved_collaboration['mq_host']
-            queue_port = retrieved_collaboration['mq_port']
-            valid_producer = EvaluateProducerOperator(
-                host=queue_host, 
-                port=queue_port
-            )
 
-            valid_producer.connect()
-
-            for valid_key, valid_kwargs in valid_combinations.items():
-                valid_producer.process(
-                    process='validate',   # operations filter for MQ consumer
-                    combination_key=valid_key,
-                    combination_params=valid_kwargs
+            try:
+                # Submit parameters of federated combinations to job queue
+                queue_info = retrieved_collaboration['mq']
+                queue_host = queue_info['host']
+                queue_port = queue_info['ports']['main']
+                valid_producer = EvaluateProducerOperator(
+                    host=queue_host, 
+                    port=queue_port
                 )
 
-            valid_producer.disconnect()
+                valid_producer.connect()
 
-            all_validations = []
-        
+                for valid_key, valid_kwargs in valid_combinations.items():
+                    valid_producer.process(
+                        process='validate',   # operations filter for MQ consumer
+                        combination_key=valid_key,
+                        combination_params=valid_kwargs
+                    )
+
+                valid_producer.disconnect()
+
+                all_validations = []
+
+            except KeyError:
+                logging.error(
+                    "SynCluster mode attempted, but no queue was declared!",
+                    code=403,
+                    description="Synergos MQ is required for running cluster mode. Please deploy and declare your MQ info when creating a collaboration.",
+                    ID_path=SOURCE_FILE,
+                    ID_class=Validations.__name__, 
+                    ID_function=Validations.post.__name__,
+                    **request.view_args
+                )
+                ns_api.abort(
+                    code=403, 
+                    message="SynCluster mode attempted, but no queue was declared!"
+                )
+
         else:
             # Run federated combinations sequentially using selected grid
             all_validations = []

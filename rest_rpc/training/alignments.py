@@ -248,9 +248,11 @@ class Alignments(Resource):
             combination_params = {'experiments': experiments, **request.json}
 
             if is_cluster:
+
                 # Submit parameters of federated combinations to job queue
-                queue_host = retrieved_collaboration['mq_host']
-                queue_port = retrieved_collaboration['mq_port']
+                queue_info = retrieved_collaboration['mq']
+                queue_host = queue_info['host']
+                queue_port = queue_info['ports']['main']
                 preprocess_producer = PreprocessProducerOperator(
                     host=queue_host, 
                     port=queue_port
@@ -293,6 +295,21 @@ class Alignments(Resource):
             )
 
             return success_payload, 201
+
+        except KeyError:
+            logging.error(
+                "SynCluster mode attempted, but no queue was declared!",
+                code=403,
+                description="Synergos MQ is required for running cluster mode. Please deploy and declare your MQ info when creating a collaboration.",
+                ID_path=SOURCE_FILE,
+                ID_class=Alignments.__name__, 
+                ID_function=Alignments.post.__name__,
+                **request.view_args
+            )
+            ns_api.abort(
+                code=403, 
+                message="SynCluster mode attempted, but no queue was declared!"
+            )
 
         except RuntimeError as e:
             logging.error(
