@@ -239,7 +239,7 @@ class MLFlogger:
     the REST-RPC setting, where statistical logging is performed during 
     post-mortem analysis
     """
-    def __init__(self, db_path: str = db_path):
+    def __init__(self, db_path: str = db_path, remote_uri: str = None):
 
         # Private attributes
         self.__rpc_formatter = RPCFormatter()
@@ -249,6 +249,8 @@ class MLFlogger:
         
         # Public attributes
         self.mlf_records = MLFRecords(db_path=db_path)
+        self.db_path = db_path
+        self.remote_uri = remote_uri
 
     ###########
     # Helpers #
@@ -312,7 +314,10 @@ class MLFlogger:
             collab_id=collab_id,
             project_id=project_id
         )
-        mlflow.set_tracking_uri(project_uri)
+        if self.remote_uri:
+            mlflow.set_tracking_uri(self.remote_uri)
+        else:
+            mlflow.set_tracking_uri(project_uri)
 
         # Check if MLFlow experiment has already been created
         mlflow_details = self.mlf_records.read(

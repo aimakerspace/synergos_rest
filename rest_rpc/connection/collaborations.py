@@ -328,6 +328,8 @@ class Collaboration(Resource):
         try:
             collab_updates = request.json
 
+            logging.warning(f"collab updates: {collab_updates}")
+
             collab_records.update(
                 collab_id=collab_id,
                 updates=collab_updates
