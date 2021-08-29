@@ -418,9 +418,6 @@ class Optimizations(Resource):
         queue_info = retrieved_collaboration['mq']
         queue_host = queue_info['host']
         queue_port = queue_info['ports']['main']
-        producer = TrainProducerOperator(host=queue_host, port=queue_port)
-        
-        producer.connect()
 
         # Populate hyperparameter tuning parameters
         tuning_params = request.json
@@ -438,7 +435,8 @@ class Optimizations(Resource):
             backend = tuning_params.get('backend', "tune")
             
             hypertuner = HYPERTUNER_BACKENDS[backend](
-                producer=producer,
+                host=queue_host,
+                port=queue_port,
                 log_dir=optim_log_dir,
             )
             hypertuner.tune(

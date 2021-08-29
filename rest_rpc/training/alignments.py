@@ -136,6 +136,8 @@ def execute_alignment_job(
     usable_grids = rpc_formatter.extract_grids(registrations)
     selected_grid = usable_grids[grid_idx]
 
+    logging.warning(f"selected grid: {selected_grid}")
+
     spacer_collection, aligned_experiments, _ = execute_combination_alignment(
         grid=selected_grid,
         **combination_params

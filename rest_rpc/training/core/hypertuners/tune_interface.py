@@ -50,14 +50,15 @@ class RayTuneTuner(BaseTuner):
     producer from Synergos Manager is necessary to facilitate this procedure. 
     
     Attributes:
-        producer (TrainProducerOperator): Producer to use for queuing jobs
+
         platform (str): What hyperparameter tuning service to use
         log_dir (str): Directory to export cached log files
     """
 
-    def __init__(self, producer: TrainProducerOperator, log_dir: str = None):
+    def __init__(self, host: str, port: int, log_dir: str = None):
         super().__init__(platform="tune", log_dir=log_dir)
-        self.producer = producer
+        self.host = host
+        self.port = port
 
     ############
     # Checkers #
@@ -240,10 +241,10 @@ class RayTuneTuner(BaseTuner):
         project_id: str,
         expt_id: str,
         search_space: Dict[str, Dict[str, Union[str, bool, int, float]]],
-        scheduler: str,
-        searcher: str,
         metric: str,
         optimize_mode: str,
+        scheduler: str = "AsyncHyperBandScheduler",
+        searcher: str = "BayesOptSearch",
         trial_concurrency: int = 1,
         max_exec_duration: str = "1h",
         max_trial_num: int = 10,
@@ -260,10 +261,11 @@ class RayTuneTuner(BaseTuner):
         configured_search_space = self._initialize_search_space(search_space)
 
         config = {
-            "producer": self.producer,
-            "collab_id": collab_id,
-            "project_id": project_id,
-            "expt_id": expt_id,
+            'host': self.host,
+            'port': self.port,
+            'collab_id': collab_id,
+            'project_id': project_id,
+            'expt_id': expt_id,
             'metric': metric,
             'auto_align': auto_align,
             'dockerised': dockerised,
@@ -275,9 +277,6 @@ class RayTuneTuner(BaseTuner):
         configured_resources = self._calculate_resources()
 
         tuning_params = self._initialize_tuning_params(
-            scheduler=scheduler,
-            searcher=searcher,
-            metric=metric,
             optimize_mode=optimize_mode,
             trial_concurrency=trial_concurrency,
             max_exec_duration=max_exec_duration,
