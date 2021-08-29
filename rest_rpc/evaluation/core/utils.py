@@ -36,6 +36,7 @@ SOURCE_FILE = os.path.abspath(__file__)
 
 schemas = app.config['SCHEMAS']
 db_path = app.config['DB_PATH']
+out_dir = app.config['OUT_DIR']
 mlflow_dir = app.config['MLFLOW_DIR']
 
 logging = app.config['NODE_LOGGER'].synlog
@@ -239,66 +240,165 @@ class MLFlogger:
     the REST-RPC setting, where statistical logging is performed during 
     post-mortem analysis
     """
-    def __init__(self, db_path: str = db_path):
+    def __init__(self, db_path: str = db_path, remote_uri: str = None):
 
         # Private attributes
         self.__rpc_formatter = RPCFormatter()
         self.__expt_records = ExperimentRecords(db_path=db_path)
         self.__run_records = RunRecords(db_path=db_path)
         self.__model_records = ModelRecords(db_path=db_path)
+        self.__connector = "_>_"
         
         # Public attributes
         self.mlf_records = MLFRecords(db_path=db_path)
+        self.db_path = db_path
+        self.remote_uri = remote_uri
 
     ###########
     # Helpers #
     ###########
 
-    def initialise_mlflow_project(
+    def _generate_expt_name(
         self, 
         collab_id: str, 
-        project_id: str
+        project_id: str, 
+        expt_id: str
     ) -> str:
-        """ In MLFlow, there is no concept of collaboration-level 
-            stratification. While they have MLFlow Projects, using this 
-            functionality will come at the cost since this conflicts with 
-            REST-RPC's job orchestration. As such, collaboration & project 
-            intialisation is done natively, by creating custom project URIs, 
-            and switching to them when necessary.
+        """ Abstracts creation of a unique key to identify an MLFlow experiment. 
+            This collapses the payload hierarchy so that only one MLFlow instance
+            is required to host all runs registered under collaboration(s)  
 
         Args:
-            project_id (str): REST-RPC ID of specified project
+            collab_id (str): ID of collaboration
+            project_id (str): ID of project
+            expt_id (str): ID of experiment
         Returns:
-            Project-specific URI (str)
+            Experiment name (str)
         """
-        project_uri = os.path.join(mlflow_dir, collab_id, project_id)
-        Path(project_uri).mkdir(parents=True, exist_ok=True)
-        return project_uri
+        return self.__connector.join([collab_id, project_id, expt_id])
 
 
-    def delete_mlflow_project(        
-        self, 
+    def _generate_run_name(
+        self,         
         collab_id: str, 
-        project_id: str
+        project_id: str, 
+        expt_id: str,
+        run_id: str
     ) -> str:
-        """ Conceptually remove all MLFlow logs made under a specific project.
+        """ Abstracts creation of a unique key to identify an MLFlow run.
 
         Args:
-            project_id (str): REST-RPC ID of specified project
+            collab_id (str): ID of collaboration
+            project_id (str): ID of project
+            expt_id (str): ID of experiment
+            run_id (str): ID of run
         Returns:
-            Removed Project-specific URI (str)
+            Run name (str)
         """
-        # Remove MLFlow directory corresponding to project's URI
-        project_uri = os.path.join(mlflow_dir, collab_id, project_id)
-        shutil.rmtree(project_uri)
-        return project_uri
+        return run_id   # keeping it simple
+
+    
+    def _generate_record_name(
+        self,
+        collab_id: str, 
+        project_id: str, 
+        expt_id: str,
+        run_id: str = "",
+        mlflow_type: str = "experiment"
+    ):
+        """ Abstracts creation of a unique key to partition experiments & runs
+            internally within the context of MLFlow.
+
+        Args:
+            collab_id (str): ID of collaboration
+            project_id (str): ID of project
+            expt_id (str): ID of experiment
+            run_id (str): ID of run
+            mlflow_type (str): Type of entity to be represented in MLFlow
+        Returns:
+            Record name (str)
+        """
+        
+        ###########################
+        # Implementation Footnote #
+        ###########################
+
+        # [Causes]
+        # In MLFlow, only experiments and runs are mappable/usable to the 
+        # Synergos hierarchy. In order to simplify the deployment process, 
+        # collaborations & projects are collapsed in as part of an MLFlow's 
+        # experiment, allowing a single instance of MLFlow to host results &
+        # analysis of results across the grid.
+
+        # [Problems]
+        # The collapsed hierarchy becomes ambigious due to the inability to
+        # distinguish between a Synergos experiment and a Synergos run.
+
+        # [Solution]
+        # Use expt_id and run_id to create a unique composite key for use when
+        # storing mapping details between MLFlow and Synergos.
+
+        if mlflow_type == "experiment":
+            return expt_id
+
+        elif mlflow_type == "run":
+            return self.__connector.join([expt_id, run_id])
+
+        else:
+            raise RuntimeError("Unsupported entity specified!")
+
+
+    def retrieve_mlflow_experiment(
+        self,
+        collab_id: str, 
+        project_id: str,
+        expt_id: str,
+    ) -> Dict[str, str]:
+        """
+        """
+        expt_name = self._generate_expt_name(collab_id, project_id, expt_id)
+        expt_record_name = self._generate_record_name(
+            collab_id, project_id, expt_id,
+            mlflow_type="experiment"
+        )
+        expt_mlflow_record = self.mlf_records.read(
+            collaboration=collab_id,
+            project=project_id, 
+            record=expt_record_name,
+            name=expt_name
+        )
+        return expt_mlflow_record
+
+
+    def retrieve_mlflow_run(
+        self,
+        collab_id: str, 
+        project_id: str,
+        expt_id: str,
+        run_id: str
+    ) -> Dict[str, str]:
+        """
+        """
+        run_name = self._generate_run_name(collab_id, project_id, expt_id, run_id)
+        run_record_name = self._generate_record_name(
+            collab_id, project_id, expt_id, run_id,
+            mlflow_type="run"
+        )
+        run_mlflow_record = self.mlf_records.read(
+            collaboration=collab_id,
+            project=project_id, 
+            record=run_record_name,
+            name=run_name
+        )
+        return run_mlflow_record
 
 
     def initialise_mlflow_experiment(
         self, 
         collab_id: str, 
         project_id: str,
-        expt_id: str
+        expt_id: str,
+        tracking_uri: str
     ) -> Dict[str, str]:
         """ Initialises an MLFlow experiment at the specified project URI
 
@@ -308,75 +408,52 @@ class MLFlogger:
         Returns:
             MLFlow Experiment configuration (dict)
         """
-        project_uri = self.initialise_mlflow_project(
-            collab_id=collab_id,
-            project_id=project_id
-        )
-        mlflow.set_tracking_uri(project_uri)
+        mlflow.set_tracking_uri(tracking_uri)
 
-        # Check if MLFlow experiment has already been created
-        mlflow_details = self.mlf_records.read(
+        expt_name = self._generate_expt_name(collab_id, project_id, expt_id)
+        expt_record_name = self._generate_record_name(
+            collab_id, project_id, expt_id,
+            mlflow_type="experiment"
+        )
+        expt_mlflow_record = self.mlf_records.read(
             collaboration=collab_id,
             project=project_id, 
-            name=expt_id
+            record=expt_record_name,
+            name=expt_name
         )
-        if not mlflow_details:
+
+        # Check if MLFlow experiment has already been created. Create a 
+        # MLFRecord if: 
+        # 1) No previous records for this combination key was initialized
+        # 2) Specified tracking URI has changed
+
+        if ((not expt_mlflow_record) or 
+            (expt_mlflow_record.get('mlflow_uri') != tracking_uri)):
             
             # Initialise MLFlow experiment
-            mlflow_id = mlflow.create_experiment(name=expt_id)
+            mlflow_id = mlflow.create_experiment(name=expt_name)
 
             mlflow_details = {
                 'collaboration': collab_id,
                 'project': project_id,
-                'name': expt_id,
+                'record': expt_record_name,
+                'name': expt_name,
                 'mlflow_type': 'experiment',
                 'mlflow_id': mlflow_id,
-                'mlflow_uri': project_uri
+                'mlflow_uri': tracking_uri  # Overridable with remote > local
             }
-            self.mlf_records.create(
+            expt_mlflow_record = self.mlf_records.create(
                 collaboration=collab_id,
                 project=project_id,
-                name=expt_id, 
+                record=expt_record_name,
+                name=expt_name, 
                 details=mlflow_details
             )
 
-        return mlflow_details
-
-
-    def delete_mlflow_experiment(
-        self, 
-        collab_id: str, 
-        project_id: str, 
-        expt_id: str,
-    ) -> str:
-        """ Conceptually removes all MLFlow logs made under a specific 
-            experiment.
-
-        Args:
-            project_id (str): REST-RPC ID of specified project
-            expt_id (str): REST-RPC ID of specified experiment
-        Returns:
-            Removed MLFlow experiment directory 
-        """
-        # Delete the details themselves
-        deleted_details = self.mlf_records.delete(
-            collaboration=collab_id,
-            project=project_id, 
-            name=expt_id
+        stripped_expt_mlflow_details = self.__rpc_formatter.strip_keys(
+            record=expt_mlflow_record
         )
-
-        # Remove experiment's MLFlow directory
-        expt_mlflow_dir = os.path.join(
-            deleted_details['mlflow_uri'], 
-            deleted_details['mlflow_id']
-        )
-        shutil.rmtree(expt_mlflow_dir)
-
-        stripped_details = self.__rpc_formatter.strip_keys(
-            record=deleted_details, 
-            concise=True
-        )
-        return stripped_details
+        return stripped_expt_mlflow_details
 
 
     def initialise_mlflow_run(
@@ -395,68 +472,80 @@ class MLFlogger:
             expt_id (str): REST-RPC ID of specified experiment
             run_id (str): REST-RPC ID of specified run
         """
-        # Initialise the parent MLFlow experiment
-        expt_mlflow_details = self.initialise_mlflow_experiment(
-            collab_id=collab_id,
-            project_id=project_id,
+        # Retrieve parent MLFlow experiment metadata (if available)
+        expt_mlflow_record = self.retrieve_mlflow_experiment(
+            collab_id=collab_id, 
+            project_id=project_id, 
             expt_id=expt_id
         )
-        expt_mlflow_id = expt_mlflow_details['mlflow_id']
+        expt_mlflow_id = expt_mlflow_record.get('mlflow_id')
+        expt_mlflow_uri = expt_mlflow_record.get('mlflow_uri')
 
-        with mlflow.start_run(
-            experiment_id=expt_mlflow_id, 
-            run_name=run_id
-        ) as mlf_run:
-
-            # Retrieve run details from database
-            run_details = self.__run_records.read(
-                collab_id=collab_id, 
-                project_id=project_id, 
-                expt_id=expt_id, 
-                run_id=run_id
+        if not expt_mlflow_id:
+            logging.error(
+                "MLFlow experiment has not been initialised!",
+                ID_path=SOURCE_FILE,
+                ID_class=MLFlogger.__name__,
+                ID_function=MLFlogger.initialise_mlflow_run.__name__
             )
-            stripped_run_details = self.__rpc_formatter.strip_keys(
-                record=run_details,
-                concise=True
-            )
+            raise RuntimeError("MLFlow experiment has not been initialised!")
 
-            mlflow.log_params(stripped_run_details)
+        run_name = self._generate_run_name(collab_id, project_id, expt_id, run_id)
+        run_record_name = self._generate_record_name(
+            collab_id, project_id, expt_id, run_id,
+            mlflow_type="run"
+        )
+        run_mlflow_record = self.mlf_records.read(
+            collaboration=collab_id,
+            project=project_id, 
+            record=run_record_name,
+            name=run_name
+        )
+        if ((not run_mlflow_record) or 
+            (run_mlflow_record.get('mlflow_uri') != expt_mlflow_uri)):
 
-            # Save the MLFlow ID mapping
-            run_mlflow_id = mlf_run.info.run_id
-            run_mlflow_details = {
-                'collaboration': collab_id,
-                'project': project_id,
-                'name': run_id,
-                'mlflow_type': 'run',
-                'mlflow_id': run_mlflow_id,
-                'mlflow_uri': expt_mlflow_details['mlflow_uri'] # same as expt
-            }
-            new_run_mlflow_details = self.mlf_records.create(
-                collaboration=collab_id,
-                project=project_id,
-                name=run_id, 
-                details=run_mlflow_details
-            )
+            with mlflow.start_run(
+                experiment_id=expt_mlflow_id, 
+                run_name=run_name
+            ) as mlf_run:
+
+                # Retrieve run details from database
+                run_details = self.__run_records.read(
+                    collab_id=collab_id, 
+                    project_id=project_id, 
+                    expt_id=expt_id, 
+                    run_id=run_id
+                )
+                stripped_run_details = self.__rpc_formatter.strip_keys(
+                    record=run_details,
+                    concise=True
+                )
+
+                mlflow.log_params(stripped_run_details)
+
+                # Save the MLFlow ID mapping
+                run_mlflow_id = mlf_run.info.run_id
+                run_mlflow_details = {
+                    'collaboration': collab_id,
+                    'project': project_id,
+                    'record': run_record_name,
+                    'name': run_name,
+                    'mlflow_type': 'run',
+                    'mlflow_id': run_mlflow_id,
+                    'mlflow_uri': expt_mlflow_record['mlflow_uri'] # same as expt
+                }
+                run_mlflow_record = self.mlf_records.create(
+                    collaboration=collab_id,
+                    project=project_id,
+                    record=run_record_name,
+                    name=run_name, 
+                    details=run_mlflow_details
+                )
 
         stripped_run_mlflow_details = self.__rpc_formatter.strip_keys(
-            record=new_run_mlflow_details
+            record=run_mlflow_record
         )
-        return stripped_run_mlflow_details
-
-
-    def delete_mlflow_run(self):
-        """
-
-        Args:
-            project_id (str): REST-RPC ID of specified project
-            expt_id (str): REST-RPC ID of specified experiment
-            run_id (str): REST-RPC ID of specified run
-        Returns:
-
-        """
-        pass
-
+        return stripped_run_mlflow_details       
 
 
     def log_losses(
@@ -476,22 +565,33 @@ class MLFlogger:
         Returns:
             Stripped metadata (dict)
         """
-        # Initialise the parent MLFlow experiment
-        expt_mlflow_details = self.initialise_mlflow_experiment(
-            collab_id=collab_id,
-            project_id=project_id,
+        # Retrieve parent MLFlow experiment metadata (if available)
+        expt_mlflow_record = self.retrieve_mlflow_experiment(
+            collab_id=collab_id, 
+            project_id=project_id, 
             expt_id=expt_id
         )
-        expt_mlflow_id = expt_mlflow_details['mlflow_id']
+        expt_mlflow_id = expt_mlflow_record.get('mlflow_id')
+
+        if not expt_mlflow_id:
+            logging.error(
+                "MLFlow experiment has not been initialised!",
+                ID_path=SOURCE_FILE,
+                ID_class=MLFlogger.__name__,
+                ID_function=MLFlogger.log_losses.__name__
+            )
+            raise RuntimeError("MLFlow experiment has not been initialised!")
 
         # Search for run session to update entry, not create a new one
-        run_mlflow_details = self.mlf_records.read(
-            collaboration=collab_id,
-            project=project_id, 
-            name=run_id
+        run_mlflow_record = self.retrieve_mlflow_run(
+            collab_id=collab_id, 
+            project_id=project_id, 
+            expt_id=expt_id, 
+            run_id=run_id
         )
+        run_mlflow_id = run_mlflow_record.get('mlflow_id')
 
-        if not run_mlflow_details:
+        if not run_mlflow_id:
             logging.error(
                 "MLFlow run has not been initialised!",
                 ID_path=SOURCE_FILE,
@@ -516,7 +616,7 @@ class MLFlogger:
 
             with mlflow.start_run(
                 experiment_id=expt_mlflow_id, 
-                run_id=run_mlflow_details['mlflow_id']
+                run_id=run_mlflow_id # continue existing run
             ) as mlf_run:
 
                 # Extract loss histories
@@ -568,30 +668,40 @@ class MLFlogger:
         Returns:
             MLFLow run details (dict)
         """
-        # Initialise the parent MLFlow experiment
-        expt_mlflow_details = self.initialise_mlflow_experiment(
-            collab_id=collab_id,
-            project_id=project_id,
+        # Retrieve parent MLFlow experiment metadata (if available)
+        expt_mlflow_record = self.retrieve_mlflow_experiment(
+            collab_id=collab_id, 
+            project_id=project_id, 
             expt_id=expt_id
         )
-        expt_mlflow_id = expt_mlflow_details['mlflow_id']
+        expt_mlflow_id = expt_mlflow_record.get('mlflow_id')
 
-        # Search for run session to update entry, not create a new one
-        run_mlflow_details = self.mlf_records.read(
-            collaboration=collab_id,
-            project=project_id, 
-            name=run_id
-        )
-        run_mlflow_id = run_mlflow_details['mlflow_id']
-
-        if not run_mlflow_details:
+        if not expt_mlflow_id:
             logging.error(
-                "Run has not been initialised!",
+                "MLFlow experiment has not been initialised!",
                 ID_path=SOURCE_FILE,
                 ID_class=MLFlogger.__name__,
                 ID_function=MLFlogger.log_losses.__name__
             )
-            raise RuntimeError("Run has not been initialised!")
+            raise RuntimeError("MLFlow experiment has not been initialised!")
+
+        # Search for run session to update entry, not create a new one
+        run_mlflow_record = self.retrieve_mlflow_run(
+            collab_id=collab_id, 
+            project_id=project_id, 
+            expt_id=expt_id, 
+            run_id=run_id
+        )
+        run_mlflow_id = run_mlflow_record.get('mlflow_id')
+
+        if not run_mlflow_id:
+            logging.error(
+                "MLFlow run has not been initialised!",
+                ID_path=SOURCE_FILE,
+                ID_class=MLFlogger.__name__,
+                ID_function=MLFlogger.log_losses.__name__
+            )
+            raise RuntimeError("MLFlow run has not been initialised!")
 
         with mlflow.start_run(
             experiment_id=expt_mlflow_id, 
@@ -618,10 +728,74 @@ class MLFlogger:
                             mlflow.log_metric(key=stat_type, value=stat_value)
 
         stripped_mlflow_run_details = self.__rpc_formatter.strip_keys(
-            run_mlflow_details, 
+            run_mlflow_record, 
             concise=True
         )
         return stripped_mlflow_run_details
+
+
+    def log_artifacts(
+        self, 
+        collab_id: str,
+        project_id: str, 
+        expt_id: str, 
+        run_id: str
+    ) -> str:
+        """ Log all artifacts produced (i.e. local & global models, losses etc.)
+            during the specified federated run.
+
+        Args:
+            project_id (str): REST-RPC ID of specified project
+            expt_id (str): REST-RPC ID of specified experiment
+            run_id (str): REST-RPC ID of specified run
+            statistics (dict): Inference statistics polled from workers
+        Returns:
+            MLFLow run details (dict)
+        """
+        # Retrieve parent MLFlow experiment metadata (if available)
+        expt_mlflow_record = self.retrieve_mlflow_experiment(
+            collab_id=collab_id, 
+            project_id=project_id, 
+            expt_id=expt_id
+        )
+        expt_mlflow_id = expt_mlflow_record.get('mlflow_id')
+
+        if not expt_mlflow_id:
+            logging.error(
+                "MLFlow experiment has not been initialised!",
+                ID_path=SOURCE_FILE,
+                ID_class=MLFlogger.__name__,
+                ID_function=MLFlogger.log_losses.__name__
+            )
+            raise RuntimeError("MLFlow experiment has not been initialised!")
+
+        # Search for run session to update entry, not create a new one
+        run_mlflow_record = self.retrieve_mlflow_run(
+            collab_id=collab_id, 
+            project_id=project_id, 
+            expt_id=expt_id, 
+            run_id=run_id
+        )
+        run_mlflow_id = run_mlflow_record.get('mlflow_id')
+
+        if not run_mlflow_id:
+            logging.error(
+                "MLFlow run has not been initialised!",
+                ID_path=SOURCE_FILE,
+                ID_class=MLFlogger.__name__,
+                ID_function=MLFlogger.log_losses.__name__
+            )
+            raise RuntimeError("MLFlow run has not been initialised!")
+       
+        with mlflow.start_run(
+            experiment_id=expt_mlflow_id, 
+            run_id=run_mlflow_id # continue existing run
+        ) as mlf_run:
+
+            results_dir = os.path.join(out_dir, collab_id, project_id, expt_id, run_id)           
+            mlflow.log_artifacts(local_dir=results_dir)
+
+        return results_dir
 
     ##################
     # Core Functions #
@@ -637,30 +811,73 @@ class MLFlogger:
         Returns:
             List of MLFlow run IDs from all runs executed (list(str))
         """
+
+        ###########################
+        # Implementation Footnote #
+        ###########################
+
+        # [Causes]
+        # Depending on where your MLFlow logs are, the accessibility of the
+        # resource changes.
+
+        # [Problems]
+        # As Synergos MLOps is an optional component, the orchestrator may or
+        # may not install it. Also, depending on the location of deployment
+        # (i.e. local filesystem vs remote tracking server), connection URI
+        # may vary.
+
+        # [Solution]
+        # By default, ALWAYS generate local MLFlow caches. If a remote tracking
+        # URI was specified, then attempt to send logs over. That way, clients
+        # will always have the option of choosing which way they would to serve
+        # their MLOps information
+
+        has_remote_tracking = self.remote_uri is not None
+        tracking_uris = (
+            [mlflow_dir, self.remote_uri] 
+            if has_remote_tracking 
+            else [mlflow_dir]
+        ) 
+
         jobs_ran = []
-        for combination_key, statistics in accumulations.items():
+        for tracking_uri in tracking_uris:
+            for combination_key, statistics in accumulations.items():
 
-            collab_id, project_id, expt_id, run_id = combination_key
+                collab_id, project_id, expt_id, run_id = combination_key
 
-            run_mlflow_details = self.initialise_mlflow_run(
-                collab_id=collab_id,
-                project_id=project_id,
-                expt_id=expt_id,
-                run_id=run_id
-            )
-            self.log_losses(
-                collab_id=collab_id,
-                project_id=project_id,
-                expt_id=expt_id,
-                run_id=run_id
-            )
-            self.log_model_performance(
-                collab_id=collab_id,
-                project_id=project_id,
-                expt_id=expt_id,
-                run_id=run_id,
-                statistics=statistics
-            )
-            jobs_ran.append(run_mlflow_details['mlflow_id'])
+                self.initialise_mlflow_experiment(
+                    collab_id=collab_id,
+                    project_id=project_id,
+                    expt_id=expt_id,
+                    tracking_uri=tracking_uri
+                )
+                run_mlflow_details = self.initialise_mlflow_run(
+                    collab_id=collab_id,
+                    project_id=project_id,
+                    expt_id=expt_id,
+                    run_id=run_id
+                )
+                self.log_losses(
+                    collab_id=collab_id,
+                    project_id=project_id,
+                    expt_id=expt_id,
+                    run_id=run_id
+                )
+                self.log_model_performance(
+                    collab_id=collab_id,
+                    project_id=project_id,
+                    expt_id=expt_id,
+                    run_id=run_id,
+                    statistics=statistics
+                )
+                self.log_artifacts(
+                    collab_id=collab_id,
+                    project_id=project_id,
+                    expt_id=expt_id,
+                    run_id=run_id
+                )
+
+                if run_mlflow_details['mlflow_id'] not in jobs_ran:
+                    jobs_ran.append(run_mlflow_details['mlflow_id'])
         
         return jobs_ran
