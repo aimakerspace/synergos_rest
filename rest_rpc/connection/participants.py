@@ -160,6 +160,8 @@ class Participants(Resource):
             new_participant_details = request.json
             participant_id = new_participant_details['id']
 
+            logging.warning(f"new participant details: {new_participant_details}")
+
             new_participant = participant_records.create(
                 participant_id=participant_id, 
                 details=new_participant_details

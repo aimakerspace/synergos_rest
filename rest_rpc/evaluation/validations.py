@@ -64,7 +64,6 @@ validation_records = ValidationRecords(db_path=db_path)
 rpc_formatter = RPCFormatter()
 
 mlflow_dir = app.config['MLFLOW_DIR']
-mlf_logger = MLFlogger()
 
 logging = app.config['NODE_LOGGER'].synlog
 logging.debug("evaluation/validations.py logged", Description="No Changes")
@@ -196,6 +195,21 @@ def execute_validation_job(
         retrieved_validations.append(retrieved_validation)
 
     # Log all statistics to MLFlow
+    retrieved_collab = collab_records.read(collab_id)
+    mlops_info = retrieved_collab.get('mlops', {})
+    mlops_host = mlops_info.get('host')
+    mlops_port = mlops_info.get('ports', {}).get('main')
+    is_secure = mlops_info.get('secure')
+    protocol = "https" if is_secure else "http"
+    mlops_tracking_uri = (
+        f"{protocol}://{mlops_host}:{mlops_port}"
+        if mlops_host and mlops_port
+        else None
+    )
+
+    logging.warning(f"MLOPS tracking uri: {mlops_tracking_uri}")
+
+    mlf_logger = MLFlogger(remote_uri=mlops_tracking_uri)
     mlf_logger.log(
         accumulations={tuple(combination_key): completed_validations}
     )

@@ -158,7 +158,7 @@ class Projects(Resource):
         )
 
         logging.info(
-            "Collaboration '{collab_id}' -> Projects: Bulk record retrieval successful!",
+            f"Collaboration '{collab_id}' -> Projects: Bulk record retrieval successful!",
             code=200, 
             description="Successfully retrieved metadata for projects",
             ID_path=SOURCE_FILE,
