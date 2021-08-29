@@ -211,22 +211,18 @@ class RayTuneTuner(BaseTuner):
         """
         configured_search_space = {}
         for hyperparameter_key in search_space.keys():
-            if type(search_space[hyperparameter_key]) == dict:
-                hyperparameter_type = search_space[hyperparameter_key]['_type']
-                hyperparameter_value = search_space[hyperparameter_key]['_value']
-                
-                # try:
-                parsed_type = tune_parser.parse_type(hyperparameter_type)
-                param_count = self._count_args(parsed_type)
-                tune_config_value = (
-                    parsed_type(*hyperparameter_value) 
-                    if param_count > 1 
-                    else parsed_type(hyperparameter_value)
-                )
+
+            hyperparameter_type = search_space[hyperparameter_key]['_type']
+            hyperparameter_value = search_space[hyperparameter_key]['_value']
             
-            else:
-                tune_config_value = search_space[hyperparameter_key]
-                
+            # try:
+            parsed_type = tune_parser.parse_type(hyperparameter_type)
+            param_count = self._count_args(parsed_type)
+            tune_config_value = (
+                parsed_type(*hyperparameter_value) 
+                if param_count > 1 
+                else parsed_type(hyperparameter_value)
+            )
             configured_search_space[hyperparameter_key] = tune_config_value
 
             # except:
@@ -243,7 +239,7 @@ class RayTuneTuner(BaseTuner):
         collab_id: str,
         project_id: str,
         expt_id: str,
-        search_space: Dict[str, Union[Dict[str, Union[str, bool, int, float]], str, bool, int, float]],
+        search_space: Dict[str, Dict[str, Union[str, bool, int, float]]],
         scheduler: str,
         searcher: str,
         metric: str,
