@@ -89,9 +89,7 @@ def run_distributed_federated_cycle(
     retrieved_expt = expt_records.read(**expt_keys)
     
     # Create an optimisation run under specified experiment for current project
-    optim_run_id = optim_run_template.safe_substitute(
-        {'id': optim_prefix + str(uuid.uuid4())}
-    )
+    optim_run_id = optim_run_template.safe_substitute({'id': str(uuid.uuid4())})
     cycle_keys ={**expt_keys, 'run_id': optim_run_id}
     run_records.create(**cycle_keys, details=params)
     new_optim_run = run_records.read(**cycle_keys)

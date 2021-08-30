@@ -133,10 +133,13 @@ def execute_alignment_job(
     registrations = registration_records.read_all(
         filter={'collab_id': collab_id, 'project_id': project_id}
     )
+
+    logging.warning(f"--->>> registrations: {registrations}")
+
     usable_grids = rpc_formatter.extract_grids(registrations)
     selected_grid = usable_grids[grid_idx]
 
-    logging.warning(f"selected grid: {selected_grid}")
+    logging.warning(f"--->>> selected grid: {selected_grid}")
 
     spacer_collection, aligned_experiments, _ = execute_combination_alignment(
         grid=selected_grid,

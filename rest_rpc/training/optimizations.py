@@ -196,14 +196,30 @@ def execute_optimization_job(
     Returns:
         Optimized validation statistics (list(Document))    
     """   
+    collab_id, project_id, expt_id, run_id = combination_key
+
+    logging.warning(f"Combination params: {combination_params}")
+
     # Step 1 -> Phase 2A: Perform alignments (if required)
-    execute_alignment_job(combination_key, combination_params)
+    execute_alignment_job(
+        (collab_id, project_id), 
+        {'experiments': [combination_params['experiment']],
+         'auto_align': combination_params['auto_align'],
+         'auto_fix': True}
+    )
 
     # Step 2 -> Phase 2B: Train on experiment-run combination
     execute_training_job(combination_key, combination_params)
 
     # Step 3 -> Phase 3A: Calculate validation statistics for target combination
-    stats = execute_validation_job(combination_key, combination_params)
+    registrations = registration_records.read_all(
+        filter={'collab_id': collab_id, 'project_id': project_id}
+    ) 
+    participants = [record['participant']['id'] for record in registrations]
+    stats = execute_validation_job(
+        combination_key, 
+        {**combination_params, 'participants': participants}
+    )
     
     return stats
 
