@@ -14,6 +14,7 @@ import ray
 from ray import tune
 from ray.tune.ray_trial_executor import RayTrialExecutor
 from ray.tune.suggest import ConcurrencyLimiter
+from ray.tune.suggest.basic_variant import BasicVariantGenerator
 
 # Custom
 from rest_rpc import app
@@ -30,6 +31,9 @@ from synmanager.train_operations import TrainProducerOperator
 SOURCE_FILE = os.path.abspath(__file__)
 
 is_master = app.config['IS_MASTER']
+is_cluster = app.config['IS_CLUSTER']
+
+db_path = app.config['DB_PATH']
 
 cores_used = app.config['CORES_USED']
 gpu_count = app.config['GPU_COUNT']
@@ -165,12 +169,22 @@ class RayTuneTuner(BaseTuner):
         parsed_searcher = tune_parser.parse_searcher(searcher_str=searcher_str)
         searcher_args = self._retrieve_args(parsed_searcher, **kwargs)
         initialized_searcher = parsed_searcher(**searcher_args)
-        search_alg = ConcurrencyLimiter(
-            searcher=initialized_searcher, 
-            max_concurrent=2,
-            batch=False
-        )
-        return search_alg
+
+        ###########################
+        # Implementation Footnote #
+        ###########################
+
+        if isinstance(initialized_searcher, BasicVariantGenerator):
+            search_algo = initialized_searcher
+
+        else:
+            search_algo = ConcurrencyLimiter(
+                searcher=initialized_searcher, 
+                max_concurrent=2,
+                batch=False
+            )
+        
+        return search_algo
 
 
     def _initialize_trial_executor(self):
@@ -210,8 +224,10 @@ class RayTuneTuner(BaseTuner):
         """ Mapping custom search space config into tune config
 
         """
+        logging.warning(f"--->>> search space: {search_space}")
         configured_search_space = {}
         for hyperparameter_key in search_space.keys():
+
 
             hyperparameter_type = search_space[hyperparameter_key]['_type']
             hyperparameter_value = search_space[hyperparameter_key]['_value']
@@ -244,7 +260,7 @@ class RayTuneTuner(BaseTuner):
         metric: str,
         optimize_mode: str,
         scheduler: str = "AsyncHyperBandScheduler",
-        searcher: str = "BayesOptSearch",
+        searcher: str = "BasicVariantGenerator",
         trial_concurrency: int = 1,
         max_exec_duration: str = "1h",
         max_trial_num: int = 10,
@@ -261,8 +277,10 @@ class RayTuneTuner(BaseTuner):
         configured_search_space = self._initialize_search_space(search_space)
 
         config = {
+            'is_cluster': is_cluster,
             'host': self.host,
             'port': self.port,
+            'db_path': db_path,
             'collab_id': collab_id,
             'project_id': project_id,
             'expt_id': expt_id,

@@ -25,8 +25,9 @@ from rest_rpc.training.core.hypertuners import (
     optim_prefix
 )
 from rest_rpc.training.core.utils import RPCFormatter
-from rest_rpc.training.core.server import execute_combination_training
-from rest_rpc.evaluation.core.server import execute_combination_inference
+from rest_rpc.training.alignments import execute_alignment_job
+from rest_rpc.training.models import execute_training_job
+from rest_rpc.evaluation.validations import execute_validation_job
 # from rest_rpc.evaluation.validations import val_output_model
 from rest_rpc.evaluation.core.utils import MLFlogger
 from synarchive.connection import (
@@ -194,48 +195,18 @@ def execute_optimization_job(
         combination_params (dict): Initializing parameters for an optimization job
     Returns:
         Optimized validation statistics (list(Document))    
-    """
-    collab_id, project_id, expt_id, run_id = combination_key
+    """   
+    # Step 1 -> Phase 2A: Perform alignments (if required)
+    execute_alignment_job(combination_key, combination_params)
+
+    # Step 2 -> Phase 2B: Train on experiment-run combination
+    execute_training_job(combination_key, combination_params)
+
+    # Step 3 -> Phase 3A: Calculate validation statistics for target combination
+    stats = execute_validation_job(combination_key, combination_params)
     
-    # Retrieve registered participants' metadata under specified project
-    registrations = registration_records.read_all(
-        filter={'collab_id': collab_id, 'project_id': project_id}
-    )
+    return stats
 
-    # Consume a grid for running current federated combination
-    usable_grids = rpc_formatter.extract_grids(registrations)
-    selected_grid = usable_grids[grid_idx]
-
-    project_keys = {'collab_id': collab_id, 'project_id': project_id}
-    expt_keys = {**project_keys, 'expt_id': expt_id}
-    cycle_keys = {**expt_keys, 'run_id': run_id}
-
-    # Train on experiment-run combination
-    results = execute_combination_training(
-        grid=selected_grid,
-        **combination_params
-    ) 
-
-    # Archive results in database
-    model_records.create(**cycle_keys, details=results)
-
-    # Calculate validation statistics for experiment-run combination
-    participants = [record['participant']['id'] for record in registrations]
-    validation_stats = execute_combination_inference(
-        grid=selected_grid,
-        participants=participants,  # perform validation on all participants
-        metas=['evaluate'],         # only perform validation on validation set
-        version=None,               # defaults to final state of federated grid
-        **combination_params
-    ) 
-    
-    # Store output metadata into database
-    for participant_id, inference_stats in validation_stats.items():
-        worker_keys = [participant_id] + combination_key
-        validation_records.create(*worker_keys, details=inference_stats)
-
-    # Log all statistics to MLFlow
-    mlf_logger.log(accumulations={tuple(combination_key): validation_stats})
 
 #############
 # Resources #
@@ -431,43 +402,42 @@ class Optimizations(Resource):
             "optimizations"
         )
 
-        try:
-            backend = tuning_params.get('backend', "tune")
-            
-            hypertuner = HYPERTUNER_BACKENDS[backend](
-                host=queue_host,
-                port=queue_port,
-                log_dir=optim_log_dir,
-            )
-            hypertuner.tune(
-                collab_id=collab_id,
-                project_id=project_id, 
-                expt_id=expt_id, 
-                **tuning_params
-            )
+        # try:
+        backend = tuning_params.get('backend', "tune")
 
-            while hypertuner.is_running():
-                time.sleep(1)
+        logging.warning(f"--->>> backend: {backend} tuning params: {tuning_params}")
+        
+        hypertuner = HYPERTUNER_BACKENDS[backend](
+            host=queue_host,
+            port=queue_port,
+            log_dir=optim_log_dir
+        )
+        hypertuner.tune(
+            collab_id=collab_id,
+            project_id=project_id, 
+            expt_id=expt_id, 
+            **tuning_params
+        )
 
-        except KeyError:
-            logging.error(
-                "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation failed.".format(
-                    collab_id, project_id, expt_id
-                ),
-                code=417, 
-                description="Inappropriate collaboration configurations passed!", 
-                ID_path=SOURCE_FILE,
-                ID_class=Optimizations.__name__, 
-                ID_function=Optimizations.post.__name__,
-                **request.view_args
-            )
-            ns_api.abort(                
-                code=417,
-                message=f"Specified backend '{backend}' is not supported!"
-            )
+        while hypertuner.is_running():
+            time.sleep(1)
 
-        finally:
-            producer.disconnect()
+        # except KeyError:
+        #     logging.error(
+        #         "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation failed.".format(
+        #             collab_id, project_id, expt_id
+        #         ),
+        #         code=417, 
+        #         description="Inappropriate collaboration configurations passed!", 
+        #         ID_path=SOURCE_FILE,
+        #         ID_class=Optimizations.__name__, 
+        #         ID_function=Optimizations.post.__name__,
+        #         **request.view_args
+        #     )
+        #     ns_api.abort(                
+        #         code=417,
+        #         message=f"Specified backend '{backend}' is not supported!"
+        #     )
 
         retrieved_validations = validation_records.read_all(
             filter=request.view_args

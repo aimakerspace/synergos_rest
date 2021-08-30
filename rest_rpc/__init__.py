@@ -12,6 +12,7 @@ from typing import Union, Callable
 from flask import Flask
 
 # Custom
+import config
 
 
 ##################
@@ -19,6 +20,7 @@ from flask import Flask
 ##################
 
 app = Flask(__name__)
+app.config.from_object(config)
 
 ###########
 # Helpers #
@@ -71,3 +73,14 @@ def initialize_app(settings: Union[ModuleType, Callable, str]) -> Flask:
     app.register_blueprint(evaluation_api, url_prefix='/ttp/evaluate')
 
     return app
+
+
+
+###########
+# Scripts #
+###########
+
+if __name__ == "__main__":
+
+    import config
+    initialize_app(settings=config) # load in default global values

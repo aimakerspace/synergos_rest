@@ -5,23 +5,14 @@
 ####################
 
 # Generic/Built-in
-import argparse
-import random
 import uuid
 from string import Template
 
 # Libs
-import re
-import ray
 from ray import tune
 
 # Custom
-import synmanager
-from rest_rpc import app
-from rest_rpc.training.core.server import execute_combination_training
-from rest_rpc.training.core.utils import RPCFormatter, Poller
-from rest_rpc.evaluation.core.server import execute_combination_inference
-from rest_rpc.evaluation.core.utils import MLFlogger
+from rest_rpc.training.core.utils import RPCFormatter
 from synarchive.connection import (
     ProjectRecords,
     ExperimentRecords,
@@ -39,20 +30,7 @@ from synmanager.train_operations import TrainProducerOperator
 
 SUPPORTED_METRICS = ['accuracy', 'roc_auc_score', 'pr_auc_score', 'f_score']
 
-is_cluster = app.config['IS_CLUSTER']
-
-db_path = app.config['DB_PATH']
-run_records = RunRecords(db_path=db_path)
-project_records = ProjectRecords(db_path=db_path)
-expt_records = ExperimentRecords(db_path=db_path)
-registration_records = RegistrationRecords(db_path=db_path)
-model_records = ModelRecords(db_path=db_path)
-validation_records = ValidationRecords(db_path=db_path)
-
 rpc_formatter = RPCFormatter()
-
-mlflow_dir = app.config['MLFLOW_DIR']
-mlf_logger = MLFlogger()
 
 # Template for generating optimisation run ID
 optim_prefix = "optim_run_"
@@ -65,6 +43,7 @@ optim_run_template = Template(optim_prefix + "$id")
 def run_distributed_federated_cycle(
     host: str,
     port: int,
+    db_path: str,
     collab_id: str,
     project_id: str,
     expt_id: str,
@@ -93,6 +72,13 @@ def run_distributed_federated_cycle(
         verbose (bool): Toggles if logging will be started in verbose mode
         **params: Hyperparameter set to train experiment model on
     """
+    run_records = RunRecords(db_path=db_path)
+    project_records = ProjectRecords(db_path=db_path)
+    expt_records = ExperimentRecords(db_path=db_path)
+    registration_records = RegistrationRecords(db_path=db_path)
+    model_records = ModelRecords(db_path=db_path)
+    validation_records = ValidationRecords(db_path=db_path)
+
     # Retrieve specific project
     project_keys = {'collab_id': collab_id, 'project_id': project_id}
     retrieved_project = project_records.read(**project_keys)
@@ -110,15 +96,17 @@ def run_distributed_federated_cycle(
     run_records.create(**cycle_keys, details=params)
     new_optim_run = run_records.read(**cycle_keys)
 
-    optim_key, optim_kwargs = rpc_formatter.enumerate_federated_conbinations(
-        action=project_action,
-        experiments=[retrieved_expt],
-        runs=[new_optim_run],
-        auto_align=auto_align,
-        dockerised=dockerised,
-        log_msgs=log_msgs,
-        verbose=verbose
-    ).items().pop()
+    optim_key, optim_kwargs = list(
+        rpc_formatter.enumerate_federated_conbinations(
+            action=project_action,
+            experiments=[retrieved_expt],
+            runs=[new_optim_run],
+            auto_align=auto_align,
+            dockerised=dockerised,
+            log_msgs=log_msgs,
+            verbose=verbose
+        ).items()
+    ).pop()
 
     # Submit parameters of federated combination to job queue
     producer = TrainProducerOperator(host=host, port=port)
@@ -157,7 +145,7 @@ def run_distributed_federated_cycle(
     while participants:
 
         participant_id = participants.pop(0)
-        worker_keys = [participant_id] + optim_key
+        worker_keys = [participant_id] + list(optim_key)
         inference_stats = validation_records.read(*worker_keys)
 
         # Archival for current participant is completed
@@ -196,6 +184,8 @@ def tune_proc(config: dict, checkpoint_dir: str):
         config (dict): 
         checkpoint_dir (str):
     """
+    is_cluster = config['is_cluster']
+
     if not is_cluster:
         raise RuntimeError("Optimization is only active in cluster mode!")
 
