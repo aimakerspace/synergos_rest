@@ -25,10 +25,18 @@ from rest_rpc.training.core.hypertuners import (
     optim_prefix
 )
 from rest_rpc.training.core.utils import RPCFormatter
-from rest_rpc.training.alignments import execute_alignment_job
-from rest_rpc.training.models import execute_training_job
-from rest_rpc.evaluation.validations import execute_validation_job
-# from rest_rpc.evaluation.validations import val_output_model
+from rest_rpc.training.alignments import (
+    execute_alignment_job,
+    archive_alignment_outputs
+)
+from rest_rpc.training.models import (
+    execute_training_job,
+    archive_training_outputs
+)
+from rest_rpc.evaluation.validations import (
+    execute_validation_job,
+    archive_validation_outputs
+)
 from rest_rpc.evaluation.core.utils import MLFlogger
 from synarchive.connection import (
     CollaborationRecords,
@@ -183,46 +191,76 @@ payload_formatter = TopicalPayload(SUBJECT, ns_api, val_output_model)
 ########
 
 def execute_optimization_job(
-    combination_key: List[str],
-    combination_params: Dict[str, Union[str, int, float, list, dict]]
+    keys: List[str],
+    grids: List[Dict[str, Any]],
+    parameters: Dict[str, Union[str, int, float, list, dict]]
 ) -> List[Document]:
     """ Encapsulated job function to be compatible for queue integrations.
         Executes model training & inference for a specified federated cycle, 
-        to optimize, and stores all outputs for subsequent use.
+        to optimize.
 
     Args:
-        combination_key (dict): Composite IDs of a federated combination
-        combination_params (dict): Initializing parameters for an optimization job
+        keys (list(str)): IDs related to federated job 
+        grid (list(dict))): Registry of participants' node information
+        parameters (dict): Initializing parameters for a federated job
     Returns:
         Optimized validation statistics (list(Document))    
     """   
-    collab_id, project_id, expt_id, run_id = combination_key
-
-    logging.warning(f"Combination params: {combination_params}")
+    collab_id, project_id, expt_id, run_id = keys
 
     # Step 1 -> Phase 2A: Perform alignments (if required)
-    execute_alignment_job(
+    align_info = execute_alignment_job(
         (collab_id, project_id), 
-        {'experiments': [combination_params['experiment']],
-         'auto_align': combination_params['auto_align'],
-         'auto_fix': True}
+        {
+            'experiments': [parameters['experiment']],
+            'auto_align': parameters['auto_align'],
+            'auto_fix': True
+        }
     )
 
     # Step 2 -> Phase 2B: Train on experiment-run combination
-    execute_training_job(combination_key, combination_params)
+    train_info = execute_training_job(keys, grids, parameters)
 
     # Step 3 -> Phase 3A: Calculate validation statistics for target combination
     registrations = registration_records.read_all(
         filter={'collab_id': collab_id, 'project_id': project_id}
     ) 
     participants = [record['participant']['id'] for record in registrations]
-    stats = execute_validation_job(
-        combination_key, 
-        {**combination_params, 'participants': participants}
+    valid_info = execute_validation_job(
+        keys, 
+        {**parameters, 'participants': participants}
     )
     
-    return stats
+    return {
+        'filters': keys,
+        'outputs': {
+            'preprocess': align_info,
+            'train': train_info,
+            'validate': valid_info
+        }
+    }
 
+
+def archive_optimization_outputs(
+    filters: List[str],
+    outputs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """ Processes and stores all optimization outputs for subsequent use
+
+    Args:
+        filters (list(str)): Composite IDs of a federated combination
+        outputs (dict): Outputs from a federated job
+    Returns:
+        Generated model (dict)      
+    """
+    alignments = archive_alignment_outputs(filters, outputs=outputs['preprocess'])
+    model = archive_training_outputs(filters, outputs=outputs['train'])
+    validations = archive_validation_outputs(filters, outputs=outputs['validate'])
+    return {
+        'alignments': alignments, 
+        'model': model, 
+        'validations': validations
+    }
 
 #############
 # Resources #

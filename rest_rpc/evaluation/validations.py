@@ -204,22 +204,7 @@ def archive_validation_outputs(
         retrieved_validations.append(retrieved_validation)
 
     # Log all statistics to MLFlow
-    collab_id, _, _, _ = filters
-    retrieved_collab = collab_records.read(collab_id)
-    mlops_info = retrieved_collab.get('mlops', {})
-    mlops_host = mlops_info.get('host')
-    mlops_port = mlops_info.get('ports', {}).get('main')
-    is_secure = mlops_info.get('secure')
-    protocol = "https" if is_secure else "http"
-    mlops_tracking_uri = (
-        f"{protocol}://{mlops_host}:{mlops_port}"
-        if mlops_host and mlops_port
-        else None
-    )
-
-    logging.warning(f"MLOPS tracking uri: {mlops_tracking_uri}")
-
-    mlf_logger = MLFlogger(remote_uri=mlops_tracking_uri)
+    mlf_logger = MLFlogger()
     mlf_logger.log(accumulations={tuple(filters): outputs})
 
     return retrieved_validations
