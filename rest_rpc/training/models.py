@@ -142,39 +142,47 @@ payload_formatter = TopicalPayload(
 ########
 
 def execute_training_job(
-    combination_key: List[str],
-    combination_params: Dict[str, Union[str, int, float, list, dict]]
+    keys: List[str],
+    grids: List[Dict[str, Any]],
+    parameters: Dict[str, Union[str, int, float, list, dict]]
 ) -> List[Document]:
     """ Encapsulated job function to be compatible for queue integrations.
-        Executes model training for a speciifed federated cycle, and stores all
-        outputs for subsequent use.
+        Executes model training for a specified federated cycle (i.e. Phase 2B)
 
     Args:
+        keys (list(str)): IDs related to federated job 
         grid (list(dict))): Registry of participants' node information
-        combination_key (dict): Composite IDs of a federated combination
-        combination_params (dict): Initializing parameters for a training job
+        parameters (dict): Initializing parameters for a federated job
     Returns:
-        Trained models (list(Document))    
+        Training data (dict)   
     """
-    collab_id, project_id, _, _ = combination_key
-
-    # Retrieve all participants' metadata
-    registrations = registration_records.read_all(
-        filter={'collab_id': collab_id, 'project_id': project_id}
-    )
-    usable_grids = rpc_formatter.extract_grids(registrations)
-    selected_grid = usable_grids[grid_idx]
+    selected_grid = grids[grid_idx]
 
     training_data = execute_combination_training(
         grid=selected_grid,
-        **combination_params
+        **parameters
     ) 
+    return {'filters': keys, 'outputs': training_data}
 
+
+def archive_training_outputs(
+    filters: List[str],
+    outputs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """ Processes and stores all model outputs for subsequent use
+
+    Args:
+        filters (list(str)): Composite IDs of a federated combination
+        outputs (dict): Outputs from a federated job
+    Returns:
+        Generated model (dict)      
+    """
     # Store output metadata into database
-    model_records.create(*combination_key, details=training_data)
-    retrieved_model = model_records.read(*combination_key)
+    model_records.create(*filters, details=outputs)
+    retrieved_model = model_records.read(*filters)
 
     return retrieved_model
+
 
 #############
 # Resources #
@@ -295,55 +303,52 @@ class Models(Resource):
             **init_params
         )
 
+        # Retrieve all participants' metadata
+        registrations = registration_records.read_all(
+            filter={'collab_id': collab_id, 'project_id': project_id}
+        )
+
+        # try:
+        usable_grids = rpc_formatter.extract_grids(registrations)
+
         if is_cluster:
 
-            try:
-                # Submit parameters of federated combinations to job queue
-                queue_info = retrieved_collaboration['mq']
-                queue_host = queue_info['host']
-                queue_port = queue_info['ports']['main']
-                train_producer = TrainProducerOperator(
-                    host=queue_host, 
-                    port=queue_port
+            # Submit parameters of federated combinations to job queue
+            queue_info = retrieved_collaboration['mq']
+            queue_host = queue_info['host']
+            queue_port = queue_info['ports']['main']
+            train_producer = TrainProducerOperator(
+                host=queue_host, 
+                port=queue_port
+            )
+
+            train_producer.connect()
+
+            for train_key, train_kwargs in training_combinations.items():
+                train_producer.process(
+                    process='train',   # operations filter for MQ consumer
+                    keys=train_key,
+                    grids=usable_grids,
+                    parameters=train_kwargs
                 )
 
-                train_producer.connect()
+            train_producer.disconnect()
 
-                for train_key, train_kwargs in training_combinations.items():
-                    train_producer.process(
-                        process='train',   # operations filter for MQ consumer
-                        combination_key=train_key,
-                        combination_params=train_kwargs
-                    )
-
-                train_producer.disconnect()
-
-                retrieved_models = []
-
-            except KeyError:
-                logging.error(
-                    "SynCluster mode attempted, but no queue was declared!",
-                    code=403,
-                    description="Synergos MQ is required for running cluster mode. Please deploy and declare your MQ info when creating a collaboration.",
-                    ID_path=SOURCE_FILE,
-                    ID_class=Models.__name__, 
-                    ID_function=Models.post.__name__,
-                    **request.view_args
-                )
-                ns_api.abort(
-                    code=403, 
-                    message="SynCluster mode attempted, but no queue was declared!"
-                )
+            retrieved_models = []
 
         else:
             # Run federated combinations sequentially using selected grid
-            retrieved_models = [
-                execute_training_job(
-                    combination_key=train_key, 
-                    combination_params=train_kwargs
+            retrieved_models = []
+            for train_key, train_kwargs in training_combinations.items():
+                train_info = execute_training_job(
+                    keys=train_key,
+                    grids=usable_grids,
+                    parameters=train_kwargs
                 )
-                for train_key, train_kwargs in training_combinations.items()
-            ]
+                trained_model = archive_training_outputs(**train_info)
+                retrieved_models.append(trained_model)
+
+        logging.warning(f"--->>> retrieved models: {retrieved_models}")
 
         success_payload = payload_formatter.construct_success_payload(
             status=200,
@@ -364,3 +369,18 @@ class Models(Resource):
         )
             
         return success_payload, 200
+
+        # except KeyError:
+        #     logging.error(
+        #         "SynCluster mode attempted, but no queue was declared!",
+        #         code=403,
+        #         description="Synergos MQ is required for running cluster mode. Please deploy and declare your MQ info when creating a collaboration.",
+        #         ID_path=SOURCE_FILE,
+        #         ID_class=Models.__name__, 
+        #         ID_function=Models.post.__name__,
+        #         **request.view_args
+        #     )
+        #     ns_api.abort(
+        #         code=403, 
+        #         message="SynCluster mode attempted, but no queue was declared!"
+        #     )

@@ -395,6 +395,7 @@ def execute_combination_alignment(
         
         for curr_expt in experiments:
 
+            logging.warning(f"--->>> experiments: {experiments}, curr_expt: {curr_expt}")
             expt_model = curr_expt['model']
 
             # Check if input layer needs alignment

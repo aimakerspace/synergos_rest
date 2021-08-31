@@ -115,36 +115,52 @@ payload_formatter = TopicalPayload(
 ########
 
 def execute_alignment_job(
-    combination_key: List[str],
-    combination_params: Dict[str, Union[str, int, float, list, dict]]
+    keys: List[str],
+    grids: List[Dict[str, Any]],
+    parameters: Dict[str, Union[str, int, float, list, dict]]
 ) -> List[Document]:
     """ Encapsulated job function to be compatible for queue integrations.
-        Executes alignment process, and stores all outputs for subsequent use.
+        Executes alignment process (i.e. Phase 2A)
 
     Args:
-        combination_key (dict): Composite IDs of a federated combination
-        combination_params (dict): Initializing parameters for an alignment job
+        keys (list(str)): IDs related to federated job 
+        grid (list(dict))): Registry of participants' node information
+        parameters (dict): Initializing parameters for a federated job
     Returns:
-        Generated alignments (list(Document))   
+        Spacer & aligned experiments (dict)   
     """
-    collab_id, project_id = combination_key
-
-    # Retrieve all participants' metadata
-    registrations = registration_records.read_all(
-        filter={'collab_id': collab_id, 'project_id': project_id}
-    )
-
-    logging.warning(f"--->>> registrations: {registrations}")
-
-    usable_grids = rpc_formatter.extract_grids(registrations)
-    selected_grid = usable_grids[grid_idx]
-
-    logging.warning(f"--->>> selected grid: {selected_grid}")
+    selected_grid = grids[grid_idx]
 
     spacer_collection, aligned_experiments, _ = execute_combination_alignment(
         grid=selected_grid,
-        **combination_params
+        **parameters
     )
+
+    return {
+        'filters': keys,
+        'outputs': {
+            'spacers': spacer_collection, 
+            'experiments': aligned_experiments
+        }
+    }
+
+
+def archive_alignment_outputs(
+    filters: List[str],
+    outputs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """ Processes and stores all alignment job outputs for subsequent use
+
+    Args:
+        filters (list(str)): Composite IDs of a federated combination
+        outputs (dict): Outputs from a federated job
+    Returns:
+        Generated alignments (list(Document))      
+    """
+    collab_id, project_id = filters
+
+    spacer_collection = outputs.get('spacers', {})
+    aligned_experiments = outputs.get('experiments', [])
 
     # Store generated alignment indexes for subsequent use
     retrieved_alignments = []
@@ -248,9 +264,15 @@ class Alignments(Resource):
         # Retrieve all relevant experimental model architectures
         experiments = expt_records.read_all(filter=request.view_args)
 
+        # Retrieve all participants' metadata
+        registrations = registration_records.read_all(
+            filter={'collab_id': collab_id, 'project_id': project_id}
+        )
+
         try:
             combination_key = [collab_id, project_id]
-            combination_params = {'experiments': experiments, **request.json}
+            usable_grids = rpc_formatter.extract_grids(registrations)
+            parameters = {'experiments': experiments, **request.json}
 
             if is_cluster:
 
@@ -267,8 +289,9 @@ class Alignments(Resource):
 
                 preprocess_producer.process(
                     process='preprocess',   # operations filter for MQ consumer
-                    combination_key=combination_key,
-                    combination_params=combination_params
+                    keys=combination_key,
+                    grids=usable_grids,
+                    parameters=parameters
                 )
 
                 preprocess_producer.disconnect()
@@ -277,10 +300,12 @@ class Alignments(Resource):
             
             else:
                 # Run federated combinations sequentially using selected grid
-                retrieved_alignments = execute_alignment_job(
-                    combination_key=combination_key, 
-                    combination_params=combination_params
+                align_info = execute_alignment_job(
+                    keys=combination_key,
+                    grids=usable_grids,
+                    parameters=parameters
                 )
+                retrieved_alignments = archive_alignment_outputs(**align_info)
 
             success_payload = payload_formatter.construct_success_payload(
                 status=201, 

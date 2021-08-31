@@ -157,44 +157,54 @@ payload_formatter = TopicalPayload(
 ########
 
 def execute_validation_job(
-    combination_key: List[str],
-    combination_params: Dict[str, Union[str, int, float, list, dict]]
+    keys: List[str],
+    grids: List[Dict[str, Any]],
+    parameters: Dict[str, Union[str, int, float, list, dict]]
 ) -> List[Document]:
     """ Encapsulated job function to be compatible for queue integrations.
-        Executes model validation for a specified federated cycle, and stores
-        all outputs for subsequent use.
+        Executes model validation for a specified federated cycle.
 
     Args:
-        combination_key (dict): Composite IDs of a federated combination
-        combination_params (dict): Initializing parameters for a validation job
+        keys (list(str)): IDs related to federated job 
+        grid (list(dict))): Registry of participants' node information
+        parameters (dict): Initializing parameters for a federated job
     Returns:
         Validation statistics (list(Document))    
     """
-    collab_id, project_id, _, _ = combination_key
-
-    # Retrieve all participants' metadata
-    registrations = registration_records.read_all(
-        filter={'collab_id': collab_id, 'project_id': project_id}
-    )
-    usable_grids = rpc_formatter.extract_grids(registrations)
-    selected_grid = usable_grids[grid_idx]
+    selected_grid = grids[grid_idx]
 
     completed_validations = execute_combination_inference(
         grid=selected_grid,
-        **combination_params
+        **parameters
     ) 
 
+    return {'filters': keys, 'outputs': completed_validations}
+
+
+def archive_validation_outputs(
+    filters: List[str],
+    outputs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """ Processes and stores all validation job outputs for subsequent use
+
+    Args:
+        filters (list(str)): Composite IDs of a federated combination
+        outputs (dict): Outputs from a federated job
+    Returns:
+        Generated validations (list(Document))      
+    """
     # Store output metadata into database
     retrieved_validations = []
-    for participant_id, inference_stats in completed_validations.items():
+    for participant_id, inference_stats in outputs.items():
         
         # Log the inference stats
-        worker_keys = [participant_id] + combination_key
+        worker_keys = [participant_id, *filters]
         validation_records.create(*worker_keys, details=inference_stats)
         retrieved_validation = validation_records.read(*worker_keys)
         retrieved_validations.append(retrieved_validation)
 
     # Log all statistics to MLFlow
+    collab_id, _, _, _ = filters
     retrieved_collab = collab_records.read(collab_id)
     mlops_info = retrieved_collab.get('mlops', {})
     mlops_host = mlops_info.get('host')
@@ -210,11 +220,10 @@ def execute_validation_job(
     logging.warning(f"MLOPS tracking uri: {mlops_tracking_uri}")
 
     mlf_logger = MLFlogger(remote_uri=mlops_tracking_uri)
-    mlf_logger.log(
-        accumulations={tuple(combination_key): completed_validations}
-    )
+    mlf_logger.log(accumulations={tuple(filters): outputs})
 
     return retrieved_validations
+
 
 #############
 # Resources #
@@ -377,9 +386,11 @@ class Validations(Resource):
             **init_params
         )
 
-        if is_cluster:
+        try:
+            usable_grids = rpc_formatter.extract_grids(registrations)
+            
+            if is_cluster:
 
-            try:
                 # Submit parameters of federated combinations to job queue
                 queue_info = retrieved_collaboration['mq']
                 queue_host = queue_info['host']
@@ -394,61 +405,68 @@ class Validations(Resource):
                 for valid_key, valid_kwargs in valid_combinations.items():
                     valid_producer.process(
                         process='validate',   # operations filter for MQ consumer
-                        combination_key=valid_key,
-                        combination_params=valid_kwargs
+                        keys=valid_key,
+                        grids=usable_grids,
+                        parameters=valid_kwargs
                     )
 
                 valid_producer.disconnect()
 
                 all_validations = []
 
-            except KeyError:
-                logging.error(
-                    "SynCluster mode attempted, but no queue was declared!",
-                    code=403,
-                    description="Synergos MQ is required for running cluster mode. Please deploy and declare your MQ info when creating a collaboration.",
-                    ID_path=SOURCE_FILE,
-                    ID_class=Validations.__name__, 
-                    ID_function=Validations.post.__name__,
-                    **request.view_args
-                )
-                ns_api.abort(
-                    code=403, 
-                    message="SynCluster mode attempted, but no queue was declared!"
-                )
+            else:
+                # Run federated combinations sequentially using selected grid
+                all_validations = []
+                for valid_key, valid_kwargs in valid_combinations.items():
+                    
+                    valid_info = execute_validation_job(
+                        keys=valid_key,
+                        grids=usable_grids,
+                        parameters=valid_kwargs
+                    )
+                    validations = archive_validation_outputs(**valid_info)
 
-        else:
-            # Run federated combinations sequentially using selected grid
-            all_validations = []
-            for valid_key, valid_kwargs in valid_combinations.items():
-                
-                retrieved_combination_validations = execute_validation_job(
-                    combination_key=list(valid_key), 
-                    combination_params=valid_kwargs
-                )
+                    # Flatten out list of predictions
+                    all_validations += validations
 
-                # Flatten out list of predictions
-                all_validations += retrieved_combination_validations
+            logging.warning(f"--->>> all validations: {all_validations}")
 
-        success_payload = payload_formatter.construct_success_payload(
-            status=200,
-            method="validations.post",
-            params=request.view_args,
-            data=all_validations
-        )
+            success_payload = payload_formatter.construct_success_payload(
+                status=200,
+                method="validations.post",
+                params=request.view_args,
+                data=all_validations
+            )
 
-        logging.info(
-            "Collaboration '{}' > Project '{}' > Experiment '{}' > Run '{}' >|< Validations: Record creation successful!".format(
-                collab_id, project_id, expt_id, run_id
-            ),
-            description="Validations for participants under collaboration '{}''s project '{}' using experiment '{}' and run '{}' was successfully collected!".format(
-                collab_id, project_id, expt_id, run_id
-            ),
-            code=201, 
-            ID_path=SOURCE_FILE,
-            ID_class=Validations.__name__, 
-            ID_function=Validations.post.__name__,
-            **request.view_args
-        )
+            logging.info(
+                "Collaboration '{}' > Project '{}' > Experiment '{}' > Run '{}' >|< Validations: Record creation successful!".format(
+                    collab_id, project_id, expt_id, run_id
+                ),
+                description="Validations for participants under collaboration '{}''s project '{}' using experiment '{}' and run '{}' was successfully collected!".format(
+                    collab_id, project_id, expt_id, run_id
+                ),
+                code=201, 
+                ID_path=SOURCE_FILE,
+                ID_class=Validations.__name__, 
+                ID_function=Validations.post.__name__,
+                **request.view_args
+            )
 
-        return success_payload, 200
+            return success_payload, 200
+
+
+
+        except KeyError:
+            logging.error(
+                "SynCluster mode attempted, but no queue was declared!",
+                code=403,
+                description="Synergos MQ is required for running cluster mode. Please deploy and declare your MQ info when creating a collaboration.",
+                ID_path=SOURCE_FILE,
+                ID_class=Validations.__name__, 
+                ID_function=Validations.post.__name__,
+                **request.view_args
+            )
+            ns_api.abort(
+                code=403, 
+                message="SynCluster mode attempted, but no queue was declared!"
+            )

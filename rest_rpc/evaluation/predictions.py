@@ -130,23 +130,25 @@ payload_formatter = TopicalPayload(
 ########
 
 def execute_prediction_job(
-    combination_key: List[str],
-    combination_params: Dict[str, Union[str, int, float, list, dict]]
+    keys: List[str],
+    grids: List[Dict[str, Any]],
+    parameters: Dict[str, Union[str, int, float, list, dict]]
 ) -> List[Document]:
     """ Encapsulated job function to be compatible for queue integrations.
         Executes model inference/usage for a specified federated cycle, and 
         stores all outputs for subsequent use.
 
     Args:
-        combination_key (dict): Composite IDs of a federated combination
-        combination_params (dict): Initializing parameters for a prediction job
+        keys (list(str)): IDs related to federated job 
+        grid (list(dict))): Registry of participants' node information
+        parameters (dict): Initializing parameters for a federated job
     Returns:
-        Prediction statistics (list(Document))    
+        Inference statistics (list(Document))  
     """
-    collab_id, project_id, expt_id, run_id = combination_key
-    participant_id = combination_params['participants'][0]  # participant's POV
+    collab_id, project_id, expt_id, run_id = keys
+    participant_id = parameters['participants'][0]  # participant's POV
 
-    new_pred_tags = combination_params.pop('tags')
+    new_pred_tags = parameters.pop('tags')
 
     # Update prediction tags for all queried projects
     for queried_project_id, tags in new_pred_tags.items():
@@ -187,8 +189,8 @@ def execute_prediction_job(
     # that of training & validation data). However, the model should 
     # not be allowed to mutate, and so `auto_fix` must be de-activated. 
 
-    experiments = [combination_params['experiment']]
-    auto_align = combination_params['auto_align']
+    experiments = [parameters['experiment']]
+    auto_align = parameters['auto_align']
 
     spacer_collection, _, _ = execute_combination_alignment(
         grid=selected_unaligned_grid, 
@@ -286,7 +288,7 @@ def execute_prediction_job(
 
     completed_predictions = execute_combination_inference(
         grid=selected_grid,
-        **combination_params
+        **parameters
     ) 
 
     logging.debug(
@@ -302,13 +304,28 @@ def execute_prediction_job(
     retrieved_predictions = []
     for participant_id, inference_stats in completed_predictions.items():
         
-        worker_key = [participant_id] + combination_key
+        worker_key = [participant_id, *keys]
         prediction_records.create(*worker_key, details=inference_stats)
         retrieved_prediction = prediction_records.read(*worker_key)
         
         retrieved_predictions.append(retrieved_prediction)
 
     return retrieved_predictions
+
+
+def archive_prediction_outputs(
+    filters: List[str],
+    outputs: Dict[str, Any]
+) -> Dict[str, Any]:
+    """ Processes and stores all inference job outputs for subsequent use
+
+    Args:
+        filters (list(str)): Composite IDs of a federated combination
+        outputs (dict): Outputs from a federated job
+    Returns:
+        Generated predictions (list(Document))       
+    """
+    pass
 
 #############
 # Resources #
@@ -523,8 +540,9 @@ class Predictions(Resource):
                 for predict_key, predict_kwargs in predict_combinations.items():
                     predict_producer.process(
                         process='predict',   # operations filter for MQ consumer
-                        combination_key=predict_key,
-                        combination_params=predict_kwargs
+                        keys=predict_key,
+                        grids=[], # temporary
+                        parameters=predict_kwargs
                     )
 
                 predict_producer.disconnect()
@@ -551,13 +569,15 @@ class Predictions(Resource):
             all_predictions = []
             for predict_key, predict_kwargs in predict_combinations.items():
                 
-                retrieved_combination_predictions = execute_prediction_job(
-                    combination_key=list(predict_key), 
-                    combination_params=predict_kwargs
+                pred_info = execute_prediction_job(
+                    keys=predict_key,
+                    grids=[], # temporary
+                    parameters=predict_kwargs
                 )
+                predictions = archive_prediction_outputs(**pred_info)
 
                 # Flatten out list of predictions
-                all_predictions += retrieved_combination_predictions
+                all_predictions += predictions
         
         success_payload = payload_formatter.construct_success_payload(
             status=200,

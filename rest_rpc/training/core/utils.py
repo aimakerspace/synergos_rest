@@ -758,7 +758,6 @@ class Poller(Orchestrator):
         ml_action = self.parse_action(node_info)
 
         # Search for tags using composite project + participant
-        logging.warning(f"--->>> node info: {node_info}")
         data_tags = self.parse_tags(node_info)
         
         payload = {'action': ml_action, 'tags': data_tags}

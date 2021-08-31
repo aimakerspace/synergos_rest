@@ -427,8 +427,7 @@ class MLFlogger:
         # 1) No previous records for this combination key was initialized
         # 2) Specified tracking URI has changed
 
-        if ((not expt_mlflow_record) or 
-            (expt_mlflow_record.get('mlflow_uri') != tracking_uri)):
+        if not expt_mlflow_record:
             
             # Initialise MLFlow experiment
             mlflow_id = mlflow.create_experiment(name=expt_name)
@@ -448,6 +447,16 @@ class MLFlogger:
                 record=expt_record_name,
                 name=expt_name, 
                 details=mlflow_details
+            )
+
+        # Update URI if necessary
+        if expt_mlflow_record.get('mlflow_uri') != tracking_uri:
+            expt_mlflow_record = self.mlf_records.update(
+                collaboration=collab_id,
+                project=project_id,
+                record=expt_record_name,
+                name=expt_name, 
+                updates={'mlflow_uri': tracking_uri}
             )
 
         stripped_expt_mlflow_details = self.__rpc_formatter.strip_keys(
@@ -501,8 +510,7 @@ class MLFlogger:
             record=run_record_name,
             name=run_name
         )
-        if ((not run_mlflow_record) or 
-            (run_mlflow_record.get('mlflow_uri') != expt_mlflow_uri)):
+        if not run_mlflow_record:
 
             with mlflow.start_run(
                 experiment_id=expt_mlflow_id, 
@@ -541,6 +549,15 @@ class MLFlogger:
                     name=run_name, 
                     details=run_mlflow_details
                 )
+
+        if run_mlflow_record.get('mlflow_uri') != expt_mlflow_uri:
+            run_mlflow_record = self.mlf_records.update(
+                collaboration=collab_id,
+                project=project_id,
+                record=run_record_name,
+                name=run_name, 
+                updates={'mlflow_uri': expt_mlflow_record['mlflow_uri']}
+            )
 
         stripped_run_mlflow_details = self.__rpc_formatter.strip_keys(
             record=run_mlflow_record

@@ -104,9 +104,12 @@ class TopicalPayload:
             Formatted payload (dict)
         """
         
+        logging.warning(f"--->>> Data: {data}")
+
         def format_document(document, kind):
 
             def encode_datetime_objects(document):
+                logging.warning(f"--->>> document: {document}")
                 datetime_serialiser = DateTimeSerializer()
                 document['created_at'] = datetime_serialiser.encode(document['created_at'])
                 return document

@@ -94,84 +94,86 @@ def run_distributed_federated_cycle(
     run_records.create(**cycle_keys, details=params)
     new_optim_run = run_records.read(**cycle_keys)
 
-    optim_key, optim_kwargs = list(
-        rpc_formatter.enumerate_federated_conbinations(
-            action=project_action,
-            experiments=[retrieved_expt],
-            runs=[new_optim_run],
-            auto_align=auto_align,
-            dockerised=dockerised,
-            log_msgs=log_msgs,
-            verbose=verbose
-        ).items()
-    ).pop()
+    tune.report({'accuracy': 0.5})
 
-    # Submit parameters of federated combination to job queue
-    producer = TrainProducerOperator(host=host, port=port)
-    producer.connect()
-    producer.process(
-        process='optimize',   # operations filter for MQ consumer
-        combination_key=optim_key,
-        combination_params=optim_kwargs
-    )
+    # optim_key, optim_kwargs = list(
+    #     rpc_formatter.enumerate_federated_conbinations(
+    #         action=project_action,
+    #         experiments=[retrieved_expt],
+    #         runs=[new_optim_run],
+    #         auto_align=auto_align,
+    #         dockerised=dockerised,
+    #         log_msgs=log_msgs,
+    #         verbose=verbose
+    #     ).items()
+    # ).pop()
 
-    ###########################
-    # Implementation Footnote #
-    ###########################
+    # # Submit parameters of federated combination to job queue
+    # producer = TrainProducerOperator(host=host, port=port)
+    # producer.connect()
+    # producer.process(
+    #     process='optimize',   # operations filter for MQ consumer
+    #     combination_key=optim_key,
+    #     combination_params=optim_kwargs
+    # )
 
-    # [Cause]
-    # PySyft Grids cannot host more than 1 federated cycle at at time. Hence, 
-    # to allow for active grid control, all optimization cycles are to be 
-    # channelled into a message queue.
+    # ###########################
+    # # Implementation Footnote #
+    # ###########################
 
-    # [Problems]
-    # In order for Ray.Tune to invoke its hyperparameter/scheduling 
-    # capabilities, it can only detect statistics from within its own sessions,
-    # which refers only to the direct function instances called from executing
-    # `tune.run()`. The queue cannot be bypassed by using Ray Nodes, since
-    # there may be cases where optimization runs are ran alongside other 
-    # training/evaluation jobs, causing the problem of conflicting grids.
+    # # [Cause]
+    # # PySyft Grids cannot host more than 1 federated cycle at at time. Hence, 
+    # # to allow for active grid control, all optimization cycles are to be 
+    # # channelled into a message queue.
 
-    # [Solution]
-    # Since jobs will perform archival processes as well, Director is to wait
-    # until statistics for a job exists in the archive before continuing.
+    # # [Problems]
+    # # In order for Ray.Tune to invoke its hyperparameter/scheduling 
+    # # capabilities, it can only detect statistics from within its own sessions,
+    # # which refers only to the direct function instances called from executing
+    # # `tune.run()`. The queue cannot be bypassed by using Ray Nodes, since
+    # # there may be cases where optimization runs are ran alongside other 
+    # # training/evaluation jobs, causing the problem of conflicting grids.
 
-    registrations = registration_records.read_all(filter=project_keys)
-    participants = [record['participant']['id'] for record in registrations]
+    # # [Solution]
+    # # Since jobs will perform archival processes as well, Director is to wait
+    # # until statistics for a job exists in the archive before continuing.
 
-    grouped_statistics = {}
-    while participants:
+    # registrations = registration_records.read_all(filter=project_keys)
+    # participants = [record['participant']['id'] for record in registrations]
 
-        participant_id = participants.pop(0)
-        worker_keys = [participant_id] + list(optim_key)
-        inference_stats = validation_records.read(*worker_keys)
+    # grouped_statistics = {}
+    # while participants:
 
-        # Archival for current participant is completed
-        if inference_stats:
+    #     participant_id = participants.pop(0)
+    #     worker_keys = [participant_id] + list(optim_key)
+    #     inference_stats = validation_records.read(*worker_keys)
 
-            # Culminate into collection of metrics
-            for metric_opt in SUPPORTED_METRICS:
-                metric_collection = grouped_statistics.get(metric_opt, [])
-                curr_metrics = inference_stats['evaluate']['statistics'][metric_opt]
-                metric_collection.append(curr_metrics)
-                grouped_statistics[metric_opt] = metric_collection
+    #     # Archival for current participant is completed
+    #     if inference_stats:
 
-        # Archival for current participant is still pending --> Postpone
-        else:
-            participants.append(participant_id)
+    #         # Culminate into collection of metrics
+    #         for metric_opt in SUPPORTED_METRICS:
+    #             metric_collection = grouped_statistics.get(metric_opt, [])
+    #             curr_metrics = inference_stats['evaluate']['statistics'][metric_opt]
+    #             metric_collection.append(curr_metrics)
+    #             grouped_statistics[metric_opt] = metric_collection
 
-    # Calculate average of all statistics as benchmarks for model performance
-    process_nans = lambda x: [max(stat, 0) for stat in x]
-    calculate_avg_stats = lambda x: (sum(x)/len(x)) if x else 0
-    avg_statistics = {
-        metric: calculate_avg_stats(process_nans([
-            calculate_avg_stats(process_nans(p_metrics)) 
-            for p_metrics in metric_collection
-        ]))
-        for metric, metric_collection in grouped_statistics.items()
-    }
+    #     # Archival for current participant is still pending --> Postpone
+    #     else:
+    #         participants.append(participant_id)
 
-    tune.report(**avg_statistics)
+    # # Calculate average of all statistics as benchmarks for model performance
+    # process_nans = lambda x: [max(stat, 0) for stat in x]
+    # calculate_avg_stats = lambda x: (sum(x)/len(x)) if x else 0
+    # avg_statistics = {
+    #     metric: calculate_avg_stats(process_nans([
+    #         calculate_avg_stats(process_nans(p_metrics)) 
+    #         for p_metrics in metric_collection
+    #     ]))
+    #     for metric, metric_collection in grouped_statistics.items()
+    # }
+
+    # tune.report(**avg_statistics)
 
 
 def tune_proc(config: dict, checkpoint_dir: str):
