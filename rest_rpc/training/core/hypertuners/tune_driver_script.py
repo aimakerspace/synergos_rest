@@ -106,13 +106,19 @@ def run_distributed_federated_cycle(
         ).items()
     ).pop()
 
+    registrations = registration_records.read_all(
+        filter={'collab_id': collab_id, 'project_id': project_id}
+    )
+    usable_grids = rpc_formatter.extract_grids(registrations)
+
     # Submit parameters of federated combination to job queue
     producer = TrainProducerOperator(host=host, port=port)
     producer.connect()
     producer.process(
         process='optimize',   # operations filter for MQ consumer
-        combination_key=optim_key,
-        combination_params=optim_kwargs
+        keys=optim_key,
+        grids=usable_grids,
+        parameters=optim_kwargs
     )
 
     ###########################
