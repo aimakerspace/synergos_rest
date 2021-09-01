@@ -206,7 +206,7 @@ def execute_optimization_job(
     Returns:
         Optimized validation statistics (list(Document))    
     """   
-    collab_id, project_id, expt_id, run_id = keys
+    collab_id, project_id, _, _ = keys
 
     # Step 1 -> Phase 2A: Perform alignments (if required)
     align_info = execute_alignment_job(
@@ -236,9 +236,9 @@ def execute_optimization_job(
     return {
         'filters': keys,
         'outputs': {
-            'preprocess': align_info,
-            'train': train_info,
-            'validate': valid_info
+            'preprocess': align_info['outputs'],
+            'train': train_info['outputs'],
+            'validate': valid_info['outputs']
         }
     }
 
@@ -255,7 +255,12 @@ def archive_optimization_outputs(
     Returns:
         Generated model (dict)      
     """
-    alignments = archive_alignment_outputs(filters, outputs=outputs['preprocess'])
+    collab_id, project_id, _, _ = filters
+
+    alignments = archive_alignment_outputs(
+        (collab_id, project_id), 
+        outputs=outputs['preprocess']
+    )
     model = archive_training_outputs(filters, outputs=outputs['train'])
     validations = archive_validation_outputs(filters, outputs=outputs['validate'])
     return {
