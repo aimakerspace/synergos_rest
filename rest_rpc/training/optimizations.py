@@ -210,8 +210,9 @@ def execute_optimization_job(
 
     # Step 1 -> Phase 2A: Perform alignments (if required)
     align_info = execute_alignment_job(
-        (collab_id, project_id), 
-        {
+        keys=(collab_id, project_id), 
+        grids=grids,
+        parameters={
             'experiments': [parameters['experiment']],
             'auto_align': parameters['auto_align'],
             'auto_fix': True
@@ -228,6 +229,7 @@ def execute_optimization_job(
     participants = [record['participant']['id'] for record in registrations]
     valid_info = execute_validation_job(
         keys, 
+        grids,
         {**parameters, 'participants': participants}
     )
     
