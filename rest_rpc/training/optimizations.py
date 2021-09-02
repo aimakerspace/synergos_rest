@@ -6,8 +6,6 @@
 
 # Generic/Built-in
 import os
-import time
-import uuid
 from string import Template
 from typing import Dict, List, Union, Any
 
@@ -47,7 +45,6 @@ from synarchive.connection import (
 )
 from synarchive.training import ModelRecords
 from synarchive.evaluation import ValidationRecords, MLFRecords
-from synmanager.train_operations import TrainProducerOperator
 
 ##################
 # Configurations #
@@ -208,34 +205,35 @@ def execute_optimization_job(
     """   
     collab_id, project_id, _, _ = keys
 
+    job_info = parameters['info']
+
     # Step 1 -> Phase 2A: Perform alignments (if required)
     align_info = execute_alignment_job(
         keys=(collab_id, project_id), 
         grids=grids,
         parameters={
-            'experiments': [parameters['experiment']],
-            'auto_align': parameters['auto_align'],
+            'experiments': [job_info['experiment']],
+            'auto_align': job_info['auto_align'],
             'auto_fix': True
         }
     )
 
     # Step 2 -> Phase 2B: Train on experiment-run combination
-    train_info = execute_training_job(keys, grids, parameters)
+    train_info = execute_training_job(keys, grids, job_info)
 
     # Step 3 -> Phase 3A: Calculate validation statistics for target combination
-    registrations = registration_records.read_all(
-        filter={'collab_id': collab_id, 'project_id': project_id}
-    ) 
-    participants = [record['participant']['id'] for record in registrations]
+    selected_grid = grids[grid_idx]
+    participants = [registry['keys']['participant_id'] for registry in selected_grid]
     valid_info = execute_validation_job(
         keys, 
         grids,
-        {**parameters, 'participants': participants}
+        {**job_info, 'participants': participants}
     )
     
     return {
         'filters': keys,
         'outputs': {
+            'hyperparameters': parameters['hyperparameters'],
             'preprocess': align_info['outputs'],
             'train': train_info['outputs'],
             'validate': valid_info['outputs']
@@ -257,6 +255,9 @@ def archive_optimization_outputs(
     """
     collab_id, project_id, _, _ = filters
 
+    hyperparameters = outputs['hyperparameters']
+    created_run = run_records.create(*filters, **hyperparameters)
+
     alignments = archive_alignment_outputs(
         (collab_id, project_id), 
         outputs=outputs['preprocess']
@@ -264,6 +265,7 @@ def archive_optimization_outputs(
     model = archive_training_outputs(filters, outputs=outputs['train'])
     validations = archive_validation_outputs(filters, outputs=outputs['validate'])
     return {
+        'run': created_run,
         'alignments': alignments, 
         'model': model, 
         'validations': validations
@@ -451,6 +453,26 @@ class Optimizations(Resource):
         queue_host = queue_info['host']
         queue_port = queue_info['ports']['main']
 
+        # Retrieve project's ML action (eg. regression vs classification)
+        retrieved_project = project_records.read(
+            collab_id=collab_id,
+            project_id=project_id
+        )
+        project_action = retrieved_project['action']
+
+        # Retrieve specific experiment 
+        retrieved_expt = expt_records.read(
+            collab_id=collab_id,
+            project_id=project_id,
+            expt_id=expt_id
+        )
+
+        # Retrieve all deployed grids
+        registrations = registration_records.read_all(
+            filter={'collab_id': collab_id, 'project_id': project_id}
+        )
+        usable_grids = rpc_formatter.extract_grids(registrations)
+
         # Populate hyperparameter tuning parameters
         tuning_params = request.json
 
@@ -474,14 +496,12 @@ class Optimizations(Resource):
             log_dir=optim_log_dir
         )
         hypertuner.tune(
-            collab_id=collab_id,
-            project_id=project_id, 
-            expt_id=expt_id, 
+            keys=request.view_args,
+            grids=usable_grids,
+            action=project_action,
+            experiment=retrieved_expt,
             **tuning_params
         )
-
-        while hypertuner.is_running():
-            time.sleep(1)
 
         # except KeyError:
         #     logging.error(

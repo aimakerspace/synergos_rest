@@ -7,7 +7,7 @@
 # Generic/Built-in
 import inspect
 import os
-from typing import Dict, List, Tuple, Union, Callable
+from typing import Dict, List, Tuple, Union, Callable, Any
 
 # Libs
 import ray
@@ -81,6 +81,22 @@ class RayTuneTuner(BaseTuner):
     ###########
     # Helpers #
     ###########
+    
+    @staticmethod
+    def _generate_cycle_name(keys: Dict[str, Any]) -> str:
+        """ Generates a unique name for the current optimization process
+
+        Args:
+            filters (list(str)): Composite IDs of a federated combination
+        Returns:
+            Cycle name (str)
+        """
+        collab_id = keys['collab_id']
+        project_id =  keys['project_id']
+        expt_id = keys['expt_id']
+        optim_cycle_name = f"{collab_id}-{project_id}-{expt_id}-optim" 
+        return optim_cycle_name
+
 
     @staticmethod
     def _retrieve_args(callable: Callable, **kwargs) -> List[str]:
@@ -253,9 +269,10 @@ class RayTuneTuner(BaseTuner):
 
     def tune(
         self,
-        collab_id: str,
-        project_id: str,
-        expt_id: str,
+        keys: Dict[str, str],
+        grids: List[Dict[str, Any]],
+        action: str,
+        experiment: Dict[str, Any],
         search_space: Dict[str, Dict[str, Union[str, bool, int, float]]],
         metric: str,
         optimize_mode: str,
@@ -272,55 +289,80 @@ class RayTuneTuner(BaseTuner):
     ):
         """
         """
-        optim_cycle_name = f"{collab_id}-{project_id}-{expt_id}-optim" 
+        ###########################
+        # Implementation Footnote #
+        ###########################
 
-        configured_search_space = self._initialize_search_space(search_space)
+        # [Cause]
+        # In SynCluster mode, all processes are inducted as jobs. All jobs are sent
+        # to Synergos MQ to be linearized for parallel distributed computing.
 
-        config = {
-            'is_cluster': is_cluster,
-            'host': self.host,
-            'port': self.port,
-            'db_path': db_path,
-            'collab_id': collab_id,
-            'project_id': project_id,
-            'expt_id': expt_id,
-            'metric': metric,
-            'auto_align': auto_align,
-            'dockerised': dockerised,
-            'verbose': verbose,
-            'log_msgs': log_msgs,
-            **configured_search_space
-        }
+        # [Problems]
+        # 
 
-        configured_resources = self._calculate_resources()
+        # [Solution]
+        # Start director as a ray head node, with all other TTPs as child nodes 
+        # connecting to it. Tuning parameters will be reported directly to the head
+        # node, bypassing the queue
 
-        tuning_params = self._initialize_tuning_params(
-            optimize_mode=optimize_mode,
-            trial_concurrency=trial_concurrency,
-            max_exec_duration=max_exec_duration,
-            max_trial_num=max_trial_num,
-            verbose=verbose,
-            **kwargs
-        )
+        ray.init()
+        assert ray.is_initialized() == True
 
-        configured_scheduler = self._initialize_trial_scheduler(
-            scheduler_str=scheduler, 
-            **{**kwargs, **tuning_params}
-        )
+        try:
+            optim_cycle_name = self._generate_cycle_name(keys)
 
-        search_algorithm = self._initialize_trial_searcher(
-            searcher_str=searcher,
-            **{**kwargs, **tuning_params}
-        )
+            configured_search_space = self._initialize_search_space(search_space)
 
-        results = tune.run(
-            tune_proc, 
-            name=optim_cycle_name,
-            config=config, 
-            resources_per_trial=configured_resources,
-            scheduler=configured_scheduler,
-            search_alg=search_algorithm,
-            **tuning_params
-        )
+            config = {
+                'is_cluster': is_cluster,
+                'host': self.host,
+                'port': self.port,
+                'keys': keys,
+                'grids': grids,
+                'action': action,
+                'experiment': experiment,
+                'metric': metric,
+                'auto_align': auto_align,
+                'dockerised': dockerised,
+                'verbose': verbose,
+                'log_msgs': log_msgs,
+                **configured_search_space
+            }
+
+            configured_resources = self._calculate_resources()
+
+            tuning_params = self._initialize_tuning_params(
+                optimize_mode=optimize_mode,
+                trial_concurrency=trial_concurrency,
+                max_exec_duration=max_exec_duration,
+                max_trial_num=max_trial_num,
+                verbose=verbose,
+                **kwargs
+            )
+
+            configured_scheduler = self._initialize_trial_scheduler(
+                scheduler_str=scheduler, 
+                **{**kwargs, **tuning_params}
+            )
+
+            search_algorithm = self._initialize_trial_searcher(
+                searcher_str=searcher,
+                **{**kwargs, **tuning_params}
+            )
+
+            results = tune.run(
+                tune_proc, 
+                name=optim_cycle_name,
+                config=config, 
+                resources_per_trial=configured_resources,
+                scheduler=configured_scheduler,
+                search_alg=search_algorithm,
+                **tuning_params
+            )
+
+        finally:
+            # Stop Ray instance
+            ray.shutdown()
+            assert ray.is_initialized() == False
 
         return results
