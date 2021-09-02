@@ -206,8 +206,8 @@ def execute_optimization_job(
     Returns:
         Optimized validation statistics (list(Document))    
     """   
-    mq_host = parameters['host']
-    mq_port = parameters['port'] 
+    mq_host = parameters['connection']['host']
+    mq_port = parameters['connection']['port'] 
     job_info = parameters['info']
 
     preprocess_producer = PreprocessProducerOperator(host=mq_host, port=mq_port)
@@ -272,7 +272,7 @@ def archive_optimization_outputs(
     Returns:
         Generated model (dict)      
     """
-    created_run = run_records.create(*filters, **outputs)
+    created_run = run_records.create(*filters, details=outputs)
 
     return {'run': created_run}
 
