@@ -305,8 +305,8 @@ class RayTuneTuner(BaseTuner):
         # connecting to it. Tuning parameters will be reported directly to the head
         # node, bypassing the queue
 
-        ray.init()
-        assert ray.is_initialized() == True
+        # ray.init()
+        # assert ray.is_initialized() == True
 
         try:
             optim_cycle_name = self._generate_cycle_name(keys)
@@ -362,7 +362,8 @@ class RayTuneTuner(BaseTuner):
 
         finally:
             # Stop Ray instance
-            ray.shutdown()
-            assert ray.is_initialized() == False
+            # ray.shutdown()
+            # assert ray.is_initialized() == False
+            pass
 
         return results

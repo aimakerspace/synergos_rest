@@ -45,6 +45,9 @@ from synarchive.connection import (
 )
 from synarchive.training import ModelRecords
 from synarchive.evaluation import ValidationRecords, MLFRecords
+from synmanager.preprocess_operations import PreprocessProducerOperator
+from synmanager.train_operations import TrainProducerOperator
+from synmanager.evaluate_operations import EvaluateProducerOperator
 
 ##################
 # Configurations #
@@ -203,41 +206,57 @@ def execute_optimization_job(
     Returns:
         Optimized validation statistics (list(Document))    
     """   
-    collab_id, project_id, _, _ = keys
-
+    mq_host = parameters['host']
+    mq_port = parameters['port'] 
     job_info = parameters['info']
 
-    # Step 1 -> Phase 2A: Perform alignments (if required)
-    align_info = execute_alignment_job(
-        keys=(collab_id, project_id), 
-        grids=grids,
-        parameters={
-            'experiments': [job_info['experiment']],
-            'auto_align': job_info['auto_align'],
-            'auto_fix': True
-        }
-    )
+    preprocess_producer = PreprocessProducerOperator(host=mq_host, port=mq_port)
+    train_producer = TrainProducerOperator(host=mq_host, port=mq_port)
+    evaluate_producer = EvaluateProducerOperator(host=mq_host, port=mq_port)
 
-    # Step 2 -> Phase 2B: Train on experiment-run combination
-    train_info = execute_training_job(keys, grids, job_info)
+    preprocess_producer.connect()
+    train_producer.connect()
+    evaluate_producer.connect()
 
-    # Step 3 -> Phase 3A: Calculate validation statistics for target combination
-    selected_grid = grids[grid_idx]
-    participants = [registry['keys']['participant_id'] for registry in selected_grid]
-    valid_info = execute_validation_job(
-        keys, 
-        grids,
-        {**job_info, 'participants': participants}
-    )
-    
+    try:
+        # Step 1 -> Phase 2A: Perform alignments (if required)
+        preprocess_producer.process(
+            process='preprocess',
+            keys=keys[:2], 
+            grids=grids,
+            parameters={
+                'experiments': [job_info['experiment']],
+                'auto_align': job_info['auto_align'],
+                'auto_fix': True
+            }
+        )
+
+        # Step 2 -> Phase 2B: Train on experiment-run combination
+        train_producer.process(
+            process='train',
+            keys=keys,
+            grids=grids,
+            parameters=job_info
+        )
+
+        # Step 3 -> Phase 3A: Calculate validation statistics for target combination
+        selected_grid = grids[grid_idx]
+        participants = [registry['keys']['participant_id'] for registry in selected_grid]
+        evaluate_producer.process(
+            process='validate',
+            keys=keys,
+            grids=grids,
+            parameters={**job_info, 'participants': participants}
+        )
+
+    finally:
+        preprocess_producer.disconnect()
+        train_producer.disconnect()
+        evaluate_producer.disconnect()
+
     return {
         'filters': keys,
-        'outputs': {
-            'hyperparameters': parameters['hyperparameters'],
-            'preprocess': align_info['outputs'],
-            'train': train_info['outputs'],
-            'validate': valid_info['outputs']
-        }
+        'outputs': parameters['hyperparameters']
     }
 
 
@@ -253,23 +272,9 @@ def archive_optimization_outputs(
     Returns:
         Generated model (dict)      
     """
-    collab_id, project_id, _, _ = filters
+    created_run = run_records.create(*filters, **outputs)
 
-    hyperparameters = outputs['hyperparameters']
-    created_run = run_records.create(*filters, **hyperparameters)
-
-    alignments = archive_alignment_outputs(
-        (collab_id, project_id), 
-        outputs=outputs['preprocess']
-    )
-    model = archive_training_outputs(filters, outputs=outputs['train'])
-    validations = archive_validation_outputs(filters, outputs=outputs['validate'])
-    return {
-        'run': created_run,
-        'alignments': alignments, 
-        'model': model, 
-        'validations': validations
-    }
+    return {'run': created_run}
 
 #############
 # Resources #

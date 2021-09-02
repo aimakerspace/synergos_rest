@@ -6,6 +6,7 @@
 
 # Generic/Built-in
 import logging
+import time
 import uuid
 from string import Template
 from typing import Dict, List, Any
@@ -15,14 +16,6 @@ from ray import tune
 
 # Custom
 from rest_rpc.training.core.utils import RPCFormatter
-from synarchive.connection import (
-    ProjectRecords,
-    ExperimentRecords,
-    RunRecords,
-    RegistrationRecords
-)
-from synarchive.training import ModelRecords
-from synarchive.evaluation import ValidationRecords
 from synmanager.train_operations import TrainProducerOperator
 from synmanager.completed_operations import CompletedConsumerOperator
 
@@ -83,7 +76,12 @@ def run_distributed_federated_cycle(
     # Create an optimisation run under specified experiment for current project
     optim_run_id = optim_run_template.safe_substitute({'id': str(uuid.uuid4())})
     cycle_keys = {**keys, 'run_id': optim_run_id}
-    new_optim_run = {'key': cycle_keys, **params}
+    new_optim_run = {
+        'key': cycle_keys, 
+        'created_at': None, # placeholder
+        'relations': {},    # placeholder
+        **params
+    }
 
     optim_key, optim_kwargs = list(
         rpc_formatter.enumerate_federated_conbinations(
@@ -97,30 +95,41 @@ def run_distributed_federated_cycle(
         ).items()
     ).pop()
 
-    # Submit parameters of federated combination to job queue
     producer = TrainProducerOperator(host=host, port=port)
-    producer.connect()
-    producer.process(
-        process='optimize',   # operations filter for MQ consumer
-        keys=optim_key,
-        grids=grids,
-        parameters={
-            'hyperparameters': params,
-            'info': optim_kwargs
-        }
-    )
-    producer.disconnect()
-
-    # Wait for process to be completed
     consumer = CompletedConsumerOperator(host=host, port=port)
-    consumer.connect()
-    while True:
-        details = consumer.poll_message(process_results)
-        logging.warning(f"Details: {details}")
 
+    producer.connect()
+    consumer.connect()
+
+    try:
+        # Submit parameters of federated combination to job queue
+        producer.process(
+            process='optimize',   # operations filter for MQ consumer
+            keys=optim_key,
+            grids=grids,
+            parameters={
+                'connection': {
+                    'host': host,
+                    'port': port,
+                },
+                'hyperparameters': params,
+                'info': optim_kwargs
+            }
+        )
+
+        # Wait for process to be completed
+        while True:
+            details = consumer.poll_message(process_results)
+            logging.warning(f"Details: {details}")
+
+            time.sleep(5)
+            break
+            
         tune.report(**{metric: 0.5})
 
-
+    finally:
+        producer.disconnect()
+        consumer.disconnect()
 
     # ###########################
     # # Implementation Footnote #
