@@ -210,26 +210,26 @@ def execute_optimization_job(
     mq_port = parameters['connection']['port'] 
     job_info = parameters['info']
 
-    preprocess_producer = PreprocessProducerOperator(host=mq_host, port=mq_port)
+    # preprocess_producer = PreprocessProducerOperator(host=mq_host, port=mq_port)
     train_producer = TrainProducerOperator(host=mq_host, port=mq_port)
     evaluate_producer = EvaluateProducerOperator(host=mq_host, port=mq_port)
 
-    preprocess_producer.connect()
+    # preprocess_producer.connect()
     train_producer.connect()
     evaluate_producer.connect()
 
     try:
         # Step 1 -> Phase 2A: Perform alignments (if required)
-        preprocess_producer.process(
-            process='preprocess',
-            keys=keys[:2], 
-            grids=grids,
-            parameters={
-                'experiments': [job_info['experiment']],
-                'auto_align': job_info['auto_align'],
-                'auto_fix': True
-            }
-        )
+        # preprocess_producer.process(
+        #     process='preprocess',
+        #     keys=keys[:2], 
+        #     grids=grids,
+        #     parameters={
+        #         'experiments': [job_info['experiment']],
+        #         'auto_align': job_info['auto_align'],
+        #         'auto_fix': True
+        #     }
+        # )
 
         # Step 2 -> Phase 2B: Train on experiment-run combination
         train_producer.process(
@@ -250,7 +250,7 @@ def execute_optimization_job(
         )
 
     finally:
-        preprocess_producer.disconnect()
+        # preprocess_producer.disconnect()
         train_producer.disconnect()
         evaluate_producer.disconnect()
 
@@ -534,42 +534,42 @@ class Optimizations(Resource):
             if optim_prefix in record['key']['run_id']
         ]
 
-        if optim_validations:
+        # if optim_validations:
             
-            success_payload = payload_formatter.construct_success_payload(
-                status=200,
-                method="optimizations.post",
-                params=request.view_args,
-                data=optim_validations
-            )
+        success_payload = payload_formatter.construct_success_payload(
+            status=200,
+            method="optimizations.post",
+            params=request.view_args,
+            data=optim_validations
+        )
 
-            logging.info(
-                "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation successful!".format(
-                    collab_id, project_id, expt_id
-                ),
-                code=200, 
-                description="Optimization(s) specified federated conditions were successfully retrieved!",
-                ID_path=SOURCE_FILE,
-                ID_class=Optimizations.__name__, 
-                ID_function=Optimizations.get.__name__,
-                **request.view_args
-            )
+        logging.info(
+            "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation successful!".format(
+                collab_id, project_id, expt_id
+            ),
+            code=200, 
+            description="Optimization(s) specified federated conditions were successfully retrieved!",
+            ID_path=SOURCE_FILE,
+            ID_class=Optimizations.__name__, 
+            ID_function=Optimizations.get.__name__,
+            **request.view_args
+        )
 
-            return success_payload, 200
+        return success_payload, 200
 
-        else:
-            logging.error(
-                "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation failed.".format(
-                    collab_id, project_id, expt_id
-                ),
-                code=404,
-                description="Optimizations do not exist for specified keyword filters!",
-                ID_path=SOURCE_FILE,
-                ID_class=Optimizations.__name__, 
-                ID_function=Optimizations.get.__name__,
-                **request.view_args
-            )
-            ns_api.abort(
-                code=404, 
-                message=f"Optimizations do not exist for specified keyword filters!"
-            ) 
+        # else:
+        #     logging.error(
+        #         "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation failed.".format(
+        #             collab_id, project_id, expt_id
+        #         ),
+        #         code=404,
+        #         description="Optimizations do not exist for specified keyword filters!",
+        #         ID_path=SOURCE_FILE,
+        #         ID_class=Optimizations.__name__, 
+        #         ID_function=Optimizations.get.__name__,
+        #         **request.view_args
+        #     )
+        #     ns_api.abort(
+        #         code=404, 
+        #         message=f"Optimizations do not exist for specified keyword filters!"
+        #     ) 

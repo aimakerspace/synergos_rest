@@ -119,13 +119,22 @@ def run_distributed_federated_cycle(
 
         # Wait for process to be completed
         while True:
-            details = consumer.poll_message(process_results)
-            logging.warning(f"Details: {details}")
+
+            completed_messages = consumer.check_message_count()
+
+            if completed_messages > 0:
+                retrieved_details = consumer.poll_message(process_results)
+                logging.warning(f"Retrieved details: {retrieved_details}")
+
+                retrieved_filters = retrieved_details.get('filters', []) 
+                logging.warning(f"Retrieved filters: {retrieved_filters}")
+                if retrieved_filters == optim_key:
+                    
+                    logging.warning(f"Are retrieved filters desired? {retrieved_filters} {optim_key} {retrieved_filters == optim_key}")
+                    tune.report(**{metric: 0.5})
+                    break
 
             time.sleep(5)
-            break
-            
-        tune.report(**{metric: 0.5})
 
     finally:
         producer.disconnect()

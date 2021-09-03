@@ -163,7 +163,7 @@ class RayTuneTuner(BaseTuner):
             # Pseudo-parallelisation lock: Allocate all resources to a single 
             # trial 
             resources_per_trial={
-                'cpu': cores_used,
+                # 'cpu': cores_used,
                 # 'gpu': gpu_count
             }
 
