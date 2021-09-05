@@ -300,17 +300,11 @@ def execute_prediction_job(
         ID_function=execute_prediction_job.__name__
     )
 
-    # Store output metadata into database
-    retrieved_predictions = []
-    for participant_id, inference_stats in completed_predictions.items():
-        
-        worker_key = [participant_id, *keys]
-        prediction_records.create(*worker_key, details=inference_stats)
-        retrieved_prediction = prediction_records.read(*worker_key)
-        
-        retrieved_predictions.append(retrieved_prediction)
+    return {
+        'filters': keys,
+        'outputs': completed_predictions
+    }
 
-    return retrieved_predictions
 
 
 def archive_prediction_outputs(
@@ -325,7 +319,17 @@ def archive_prediction_outputs(
     Returns:
         Generated predictions (list(Document))       
     """
-    pass
+    # Store output metadata into database
+    retrieved_predictions = []
+    for participant_id, inference_stats in outputs.items():
+        
+        worker_key = [participant_id, *filters]
+        prediction_records.create(*worker_key, details=inference_stats)
+        retrieved_prediction = prediction_records.read(*worker_key)
+        
+        retrieved_predictions.append(retrieved_prediction)
+
+    return retrieved_predictions
 
 #############
 # Resources #
