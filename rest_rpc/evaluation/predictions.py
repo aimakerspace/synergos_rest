@@ -306,7 +306,6 @@ def execute_prediction_job(
     }
 
 
-
 def archive_prediction_outputs(
     filters: List[str],
     outputs: Dict[str, Any]
