@@ -29,7 +29,7 @@ from synlogger.general import DirectorLogger, SysmetricLogger
 
 SRC_DIR = Path(__file__).parent.absolute()
 
-API_VERSION = "0.2.0"
+API_VERSION = "0.1.0"
 
 infinite_nested_dict = lambda: defaultdict(infinite_nested_dict)
 
@@ -264,10 +264,10 @@ MLFLOW_DIR = "/mlflow"
 CACHE = infinite_nested_dict()
 
 # Allocate no. of cores for processes
-CORES_USED = count_available_cpus(safe_mode=True)
+CORES_USED = 1  # defaults to only 1 core. MUST BE OVERRIDDEN!
 
 # Detect no. of GPUs attached to server
-GPU_COUNT = count_available_gpus()
+GPU_COUNT = 0   # defaults non-GPU mode. MUST BE OVERRIDDEN!
 GPUS = [g_idx for g_idx in range(GPU_COUNT)]
 USE_GPU = GPU_COUNT > 0 and th.cuda.is_available()
 DEVICE = th.device('cuda' if USE_GPU else 'cpu')
