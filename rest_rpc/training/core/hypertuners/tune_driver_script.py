@@ -6,6 +6,7 @@
 
 # Generic/Built-in
 import logging
+from multiprocessing import process
 import time
 import uuid
 from string import Template
@@ -31,15 +32,51 @@ rpc_formatter = RPCFormatter()
 optim_prefix = "optim_run_"
 optim_run_template = Template(optim_prefix + "$id")
 
+###########
+# Helpers #
+###########
+
+class JobCompleted(Exception):
+    """ 
+    Pseudo-hack to terminate completed consumer loop once an optim cycle 
+    has completed.
+
+    Attributes:
+        filters (list(str)): Composite IDs of a federated combination
+        message (str): Message to be displayed
+    """
+    def __init__(
+        self, 
+        filters: List[str],
+        outputs: Dict[str, Any],
+        message="Optim cycle completed!"
+    ):
+        self.filters = filters
+        self.outputs = outputs
+        self.message = message
+        super().__init__(self.message)
+
+    def __str__(self):
+        return f"{' > '.join(self.filters)} -> {self.message}"
+
+
+def process_results(
+    _ids: List[str],
+    process: str,
+    filters: List[str],
+    outputs: Dict[str, Any]
+):
+    """ Helper function used to curry an archival message from the completed
+        queue to check if an optimization cycle has completed, and if so, 
+        flags the Tune process for termination
+    """
+    # Optim Job has gone full cycle! Raise job completion alert
+    if process=="validate" and filters == _ids:
+        raise JobCompleted(filters=filters, outputs=outputs)
+
 #############
 # Functions #
 #############
-
-def process_results(**kwargs):
-    """
-    """
-    return kwargs
-
 
 def run_distributed_federated_cycle(
     host: str,
@@ -96,10 +133,7 @@ def run_distributed_federated_cycle(
     ).pop()
 
     producer = TrainProducerOperator(host=host, port=port)
-    consumer = CompletedConsumerOperator(host=host, port=port)
-
     producer.connect()
-    consumer.connect()
 
     try:
         # Submit parameters of federated combination to job queue
@@ -117,86 +151,8 @@ def run_distributed_federated_cycle(
             }
         )
 
-        # Wait for process to be completed
-        while True:
-
-            completed_messages = consumer.check_message_count()
-
-            if completed_messages > 0:
-                retrieved_details = consumer.poll_message(process_results)
-                logging.warning(f"Retrieved details: {retrieved_details}")
-
-                retrieved_filters = retrieved_details.get('filters', []) 
-                logging.warning(f"Retrieved filters: {retrieved_filters}")
-                if retrieved_filters == optim_key:
-                    
-                    logging.warning(f"Are retrieved filters desired? {retrieved_filters} {optim_key} {retrieved_filters == optim_key}")
-                    tune.report(**{metric: 0.5})
-                    break
-
-            time.sleep(5)
-
     finally:
         producer.disconnect()
-        consumer.disconnect()
-
-    # ###########################
-    # # Implementation Footnote #
-    # ###########################
-
-    # # [Cause]
-    # # PySyft Grids cannot host more than 1 federated cycle at at time. Hence, 
-    # # to allow for active grid control, all optimization cycles are to be 
-    # # channelled into a message queue.
-
-    # # [Problems]
-    # # In order for Ray.Tune to invoke its hyperparameter/scheduling 
-    # # capabilities, it can only detect statistics from within its own sessions,
-    # # which refers only to the direct function instances called from executing
-    # # `tune.run()`. The queue cannot be bypassed by using Ray Nodes, since
-    # # there may be cases where optimization runs are ran alongside other 
-    # # training/evaluation jobs, causing the problem of conflicting grids.
-
-    # # [Solution]
-    # # Since jobs will perform archival processes as well, Director is to wait
-    # # until statistics for a job exists in the archive before continuing.
-
-    # registrations = registration_records.read_all(filter=project_keys)
-    # participants = [record['participant']['id'] for record in registrations]
-
-    # grouped_statistics = {}
-    # while participants:
-
-    #     participant_id = participants.pop(0)
-    #     worker_keys = [participant_id] + list(optim_key)
-    #     inference_stats = validation_records.read(*worker_keys)
-
-    #     # Archival for current participant is completed
-    #     if inference_stats:
-
-    #         # Culminate into collection of metrics
-    #         for metric_opt in SUPPORTED_METRICS:
-    #             metric_collection = grouped_statistics.get(metric_opt, [])
-    #             curr_metrics = inference_stats['evaluate']['statistics'][metric_opt]
-    #             metric_collection.append(curr_metrics)
-    #             grouped_statistics[metric_opt] = metric_collection
-
-    #     # Archival for current participant is still pending --> Postpone
-    #     else:
-    #         participants.append(participant_id)
-
-    # # Calculate average of all statistics as benchmarks for model performance
-    # process_nans = lambda x: [max(stat, 0) for stat in x]
-    # calculate_avg_stats = lambda x: (sum(x)/len(x)) if x else 0
-    # avg_statistics = {
-    #     metric: calculate_avg_stats(process_nans([
-    #         calculate_avg_stats(process_nans(p_metrics)) 
-    #         for p_metrics in metric_collection
-    #     ]))
-    #     for metric, metric_collection in grouped_statistics.items()
-    # }
-
-    # tune.report(**avg_statistics)
 
 
 def tune_proc(config: dict, checkpoint_dir: str):
@@ -213,5 +169,3 @@ def tune_proc(config: dict, checkpoint_dir: str):
         raise RuntimeError("Optimization is only active in cluster mode!")
 
     return run_distributed_federated_cycle(**config)
-
-

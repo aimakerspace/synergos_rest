@@ -23,18 +23,6 @@ from rest_rpc.training.core.hypertuners import (
     optim_prefix
 )
 from rest_rpc.training.core.utils import RPCFormatter
-from rest_rpc.training.alignments import (
-    execute_alignment_job,
-    archive_alignment_outputs
-)
-from rest_rpc.training.models import (
-    execute_training_job,
-    archive_training_outputs
-)
-from rest_rpc.evaluation.validations import (
-    execute_validation_job,
-    archive_validation_outputs
-)
 from rest_rpc.evaluation.core.utils import MLFlogger
 from synarchive.connection import (
     CollaborationRecords,
@@ -219,19 +207,7 @@ def execute_optimization_job(
     evaluate_producer.connect()
 
     try:
-        # Step 1 -> Phase 2A: Perform alignments (if required)
-        # preprocess_producer.process(
-        #     process='preprocess',
-        #     keys=keys[:2], 
-        #     grids=grids,
-        #     parameters={
-        #         'experiments': [job_info['experiment']],
-        #         'auto_align': job_info['auto_align'],
-        #         'auto_fix': True
-        #     }
-        # )
-
-        # Step 2 -> Phase 2B: Train on experiment-run combination
+        # Step 1 -> Phase 2B: Train on experiment-run combination
         train_producer.process(
             process='train',
             keys=keys,
@@ -239,7 +215,7 @@ def execute_optimization_job(
             parameters=job_info
         )
 
-        # Step 3 -> Phase 3A: Calculate validation statistics for target combination
+        # Step 2 -> Phase 3A: Calculate validation statistics for target combination
         selected_grid = grids[grid_idx]
         participants = [registry['keys']['participant_id'] for registry in selected_grid]
         evaluate_producer.process(
@@ -364,7 +340,7 @@ class Optimizations(Resource):
             logging.error(
                 f"Collaboration '{collab_id}' > Project '{project_id}' -> Experiment '{expt_id}' -> Optimizations:  Record(s) retrieval failed.",
                 code=404,
-                description="Optimizations do not exist for specified keyword filters!",
+                description="Optimization statistics do not exist for specified keyword filters yet!",
                 ID_path=SOURCE_FILE,
                 ID_class=Optimizations.__name__, 
                 ID_function=Optimizations.get.__name__,
@@ -490,86 +466,85 @@ class Optimizations(Resource):
             "optimizations"
         )
 
-        # try:
-        backend = tuning_params.get('backend', "tune")
+        try:
+            backend = tuning_params.get('backend', "tune")
+            
+            hypertuner = HYPERTUNER_BACKENDS[backend](
+                host=queue_host,
+                port=queue_port,
+                log_dir=optim_log_dir
+            )
+            hypertuner.tune(
+                keys=request.view_args,
+                grids=usable_grids,
+                action=project_action,
+                experiment=retrieved_expt,
+                **tuning_params
+            )
 
-        logging.warning(f"--->>> backend: {backend} tuning params: {tuning_params}")
-        
-        hypertuner = HYPERTUNER_BACKENDS[backend](
-            host=queue_host,
-            port=queue_port,
-            log_dir=optim_log_dir
-        )
-        hypertuner.tune(
-            keys=request.view_args,
-            grids=usable_grids,
-            action=project_action,
-            experiment=retrieved_expt,
-            **tuning_params
-        )
+        except KeyError:
+            logging.error(
+                "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation failed.".format(
+                    collab_id, project_id, expt_id
+                ),
+                code=417, 
+                description="Inappropriate collaboration configurations passed!", 
+                ID_path=SOURCE_FILE,
+                ID_class=Optimizations.__name__, 
+                ID_function=Optimizations.post.__name__,
+                **request.view_args
+            )
+            ns_api.abort(                
+                code=417,
+                message=f"Specified backend '{backend}' is not supported!"
+            )
 
-        # except KeyError:
-        #     logging.error(
-        #         "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation failed.".format(
-        #             collab_id, project_id, expt_id
-        #         ),
-        #         code=417, 
-        #         description="Inappropriate collaboration configurations passed!", 
-        #         ID_path=SOURCE_FILE,
-        #         ID_class=Optimizations.__name__, 
-        #         ID_function=Optimizations.post.__name__,
-        #         **request.view_args
-        #     )
-        #     ns_api.abort(                
-        #         code=417,
-        #         message=f"Specified backend '{backend}' is not supported!"
-        #     )
-
-        retrieved_validations = validation_records.read_all(
+        retrieved_runs = run_records.read_all(
             filter=request.view_args
         )
-        optim_validations = [
+        optim_runs = [
             record 
-            for record in retrieved_validations
+            for record in retrieved_runs
             if optim_prefix in record['key']['run_id']
         ]
 
-        # if optim_validations:
-            
-        success_payload = payload_formatter.construct_success_payload(
-            status=200,
-            method="optimizations.post",
-            params=request.view_args,
-            data=optim_validations
-        )
+        if optim_runs:
+                
+            success_payload = payload_formatter.construct_success_payload(
+                status=200,
+                method="optimizations.post",
+                params=request.view_args,
+                data=optim_runs
+            )
 
-        logging.info(
-            "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation successful!".format(
-                collab_id, project_id, expt_id
-            ),
-            code=200, 
-            description="Optimization(s) specified federated conditions were successfully retrieved!",
-            ID_path=SOURCE_FILE,
-            ID_class=Optimizations.__name__, 
-            ID_function=Optimizations.get.__name__,
-            **request.view_args
-        )
+            logging.info(
+                "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation successful!".format(
+                    collab_id, project_id, expt_id
+                ),
+                code=200, 
+                description="Optimization(s) specified federated conditions were successfully retrieved!",
+                ID_path=SOURCE_FILE,
+                ID_class=Optimizations.__name__, 
+                ID_function=Optimizations.get.__name__,
+                **request.view_args
+            )
 
-        return success_payload, 200
+            return success_payload, 200
 
-        # else:
-        #     logging.error(
-        #         "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation failed.".format(
-        #             collab_id, project_id, expt_id
-        #         ),
-        #         code=404,
-        #         description="Optimizations do not exist for specified keyword filters!",
-        #         ID_path=SOURCE_FILE,
-        #         ID_class=Optimizations.__name__, 
-        #         ID_function=Optimizations.get.__name__,
-        #         **request.view_args
-        #     )
-        #     ns_api.abort(
-        #         code=404, 
-        #         message=f"Optimizations do not exist for specified keyword filters!"
-        #     ) 
+
+        else:
+            logging.error(
+                "Collaboration '{}' > Project '{}' > Model '{}' > Optimizations: Record(s) creation failed.".format(
+                    collab_id, project_id, expt_id
+                ),
+                code=404,
+                description="Optimizations do not exist for specified keyword filters!",
+                ID_path=SOURCE_FILE,
+                ID_class=Optimizations.__name__, 
+                ID_function=Optimizations.get.__name__,
+                **request.view_args
+            )
+            ns_api.abort(
+                code=404, 
+                message=f"Optimizations do not exist for specified keyword filters!"
+            ) 

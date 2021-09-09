@@ -27,7 +27,7 @@ blueprint = Blueprint('connections', __name__)
 
 api = Api(
     app=blueprint,
-    version="1.0",
+    version="0.1.0",
     title="Synergos Orchestrator REST-RPC Connection API", 
     description="API to facilitate metadata collection between TTP & participants for WS connection"
 )

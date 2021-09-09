@@ -135,7 +135,13 @@ class RayTuneTuner(BaseTuner):
 
 
     def _parse_max_duration(self, duration: str = "1h") -> int:
-        """
+        """ Takes a user specified max duration string and converts it to 
+            number of seconds.
+
+        Args:
+            duration (str): Max duration string
+        Returns:
+            Duration in seconds (int) 
         """
         SECS_PER_UNIT = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
         convert_to_seconds = lambda s: int(s[:-1]) * SECS_PER_UNIT[s[-1]]
@@ -150,28 +156,55 @@ class RayTuneTuner(BaseTuner):
             return None
 
 
-    def _calculate_resources(self):
+    def _calculate_resources(
+        self, 
+        max_concurrent: int
+    ) -> Dict[str, Union[float, int]]:
+        """ Distributes no. of system cores to hyperparameter set generation
+
+        Args:
+            max_concurrent (int): No. of concurrent Tune jobs to run
+        Returns:
+            Resource kwargs (dict) 
         """
-        """
-        # If TTP node is master node --> Synergos Basic --> No parallelisation!
-        if is_master:
+        ###########################
+        # Implementation Footnote #
+        ###########################
 
-            ###########################
-            # Implementation Footnote #
-            ###########################
+        # [Causes]
+        # Tune is responsible for generating hyperparameter sets. However,
+        # Synergos handles all federated training within their own grids.
 
-            # Pseudo-parallelisation lock: Allocate all resources to a single 
-            # trial 
-            resources_per_trial={
-                # 'cpu': cores_used,
-                # 'gpu': gpu_count
-            }
+        # [Problems]
+        # Tune auto-detects the amount of resources available for use. This is
+        # not an issue if only one Synergos component is deployed onto 1 VM.
+        # However, in the event that multiple components are deployed to the
+        # same VM, then these Tune jobs would auto-scale & over-allocate itself
+        # resources, when in fact it is performing a low-compute task of set
+        # generation as compared to other components
 
-            return resources_per_trial
+        # [Solutions]
+        # Only allocate cores available to the system to generate 
+        # hyperparameter sets, since all jobs will be handled out of Tune, 
+        # in seperate grids, that may or may not be in the same machine
+        # consuming the same resources. 
+        resources_per_trial={
+            'cpu': cores_used/max_concurrent, 
+            'gpu': 0
+        }
+
+        return resources_per_trial
 
 
     def _initialize_trial_scheduler(self, scheduler_str: str, **kwargs):
-        """
+        """ Parses user inputs and initializes a Tune trial scheduler to manage
+            the optimization process
+
+        Args:
+            scheduler_str (str): Name of scheduler module as a string
+            kwargs: Any parameters as required by aforementioned scheduler
+        Returns:
+            Scheduler (Tune object) 
         """
         parsed_scheduler = tune_parser.parse_scheduler(scheduler_str=scheduler_str)
         scheduler_args = self._retrieve_args(parsed_scheduler, **kwargs)
@@ -180,7 +213,17 @@ class RayTuneTuner(BaseTuner):
 
 
     def _initialize_trial_searcher(self, searcher_str: str, **kwargs):
-        """ Axsearch comflicting dependencies. Dragonfly-opt is not supported
+        """ Parses user inputs and initializes a Tune trial searcher to manage
+            the optimization process
+
+            Note: 
+            Axsearch comflicting dependencies. Dragonfly-opt is not supported
+
+        Args:
+            searcher_str (str): Name of searcher module as a string
+            kwargs: Any parameters as required by aforementioned searcher
+        Returns:
+            Searcher (Tune object)
         """
         parsed_searcher = tune_parser.parse_searcher(searcher_str=searcher_str)
         searcher_args = self._retrieve_args(parsed_searcher, **kwargs)
@@ -190,13 +233,24 @@ class RayTuneTuner(BaseTuner):
         # Implementation Footnote #
         ###########################
 
+        # [Causes]
+        # BasicVariantGenerator in Tune is fundamental, so it itself is a
+        # searcher, and is the primary wrapper around other searchers
+
+        # [Problems]
+        # This is asymmetric since it is unable to wrap around itself 
+        
+        # [Solutions]
+        # Detect if intialized searcher is of BasicVariantGenerator, and manage
+        # it accordingly
+        
         if isinstance(initialized_searcher, BasicVariantGenerator):
             search_algo = initialized_searcher
 
         else:
             search_algo = ConcurrencyLimiter(
                 searcher=initialized_searcher, 
-                max_concurrent=2,
+                max_concurrent=1,#kwargs.get('max_concurrent', 1),
                 batch=False
             )
         
@@ -204,7 +258,7 @@ class RayTuneTuner(BaseTuner):
 
 
     def _initialize_trial_executor(self):
-        """
+        """ Initializes a trial executor for subsequent use
         """
         self.__executor = RayTrialExecutor(queue_trials=False)
         return self.__executor
@@ -218,8 +272,26 @@ class RayTuneTuner(BaseTuner):
         max_trial_num: int = 10,
         verbose: bool = False,
         **kwargs
-    ):
-        """
+    ) -> Dict[str, Union[float, int]]:
+        """ Parses user inputs and generates a set of tuning kwargs to 
+            initialize other required parameter objects
+
+        Args:
+            optimize_mode (str): Direction to optimize metric (i.e. "max"/"min")
+            trial_concurrency (int): No. of trials to run concurrently. This is
+                in context of Tune, and is independent to the no. of jobs that
+                can be run concurrently across Synergos grids. Eg. Tune is
+                supposed to create 10 trials, at 5 concurrently, but 
+                collaborators have only deployed 2 usable grids. This way, Tune
+                will still generate 5 trials, but will have to wait until all
+                5 trials have been completed across 2 Synergos grids first
+                before proceeding on to the next batch of 5 trials
+            max_exec_duration (str): Duration string capping each trial's runtime
+            max_trial_num (int): Max number of trials to run before giving up
+            verbose (bool): Toggles verbosity of outputs
+            kwargs: Miscellaneous params that may or may not be used
+        Returns:
+            Tuning parameters (dict)
         """
         parsed_duration = self._parse_max_duration(max_exec_duration)
         configured_executor = self._initialize_trial_executor()
@@ -236,30 +308,32 @@ class RayTuneTuner(BaseTuner):
         }
 
 
-    def _initialize_search_space(self, search_space: dict):
-        """ Mapping custom search space config into tune config
+    def _initialize_search_space(self, search_space: dict) -> dict:
+        """ Mapping custom search space config into Tune config
 
+        Args:
+            search_space (dict): Parameter space to search upon
+        Returns
+            Tune search configurations (dict)
         """
-        logging.warning(f"--->>> search space: {search_space}")
         configured_search_space = {}
         for hyperparameter_key in search_space.keys():
-
 
             hyperparameter_type = search_space[hyperparameter_key]['_type']
             hyperparameter_value = search_space[hyperparameter_key]['_value']
             
-            # try:
-            parsed_type = tune_parser.parse_type(hyperparameter_type)
-            param_count = self._count_args(parsed_type)
-            tune_config_value = (
-                parsed_type(*hyperparameter_value) 
-                if param_count > 1 
-                else parsed_type(hyperparameter_value)
-            )
-            configured_search_space[hyperparameter_key] = tune_config_value
+            try:
+                parsed_type = tune_parser.parse_type(hyperparameter_type)
+                param_count = self._count_args(parsed_type)
+                tune_config_value = (
+                    parsed_type(*hyperparameter_value) 
+                    if param_count > 1 
+                    else parsed_type(hyperparameter_value)
+                )
+                configured_search_space[hyperparameter_key] = tune_config_value
 
-            # except:
-            #     raise RuntimeError(f"Specified hyperparmeter type '{hyperparameter_type}' is unsupported!")
+            except:
+                raise RuntimeError(f"Specified hyperparmeter type '{hyperparameter_type}' is unsupported!")
 
         return configured_search_space
 
@@ -287,7 +361,29 @@ class RayTuneTuner(BaseTuner):
         log_msgs: bool = True,
         **kwargs
     ):
-        """
+        """ Triggers parallelized hyperparameter optimzation
+
+        Args:
+            keys (dict): Unique IDs that form a composite key identifying the
+                current federated cycle
+            grids (list(dict)): All availble registered Synergos grids
+            action (str): ML operation to perform
+            experiment (dict): Experiment record documenting model architecture
+            search_space (dict): Parameter space to search upon
+            metric (str): Metric to optimize on
+            optimize_mode (str): Direction to optimize metric (i.e. "max"/"min")
+            scheduler (str): Name of scheduler module as a string
+            searcher (str): Name of searcher module as a string
+            trial_concurrency (int): No. of Tune trials to generate concurrently
+            max_exec_duration (str): Duration string capping each trial's runtime
+            max_trial_num (int): Max number of trials to run before giving up
+            auto_align (bool): Toggles if model should be auto-aligned
+            dockerized (bool): Toggles if deployed system is dockerized
+            verbose (bool): Toggles verbosity of outputs
+            log_msgs (bool): Toggles logging
+            kwargs: Miscellaneous parameters
+        Returns:
+            Results
         """
         ###########################
         # Implementation Footnote #
@@ -298,15 +394,15 @@ class RayTuneTuner(BaseTuner):
         # to Synergos MQ to be linearized for parallel distributed computing.
 
         # [Problems]
-        # 
+        # Ray logs need to be aligned across distributed setting
 
         # [Solution]
         # Start director as a ray head node, with all other TTPs as child nodes 
         # connecting to it. Tuning parameters will be reported directly to the head
         # node, bypassing the queue
 
-        # ray.init()
-        # assert ray.is_initialized() == True
+        ray.init(num_cpus=cores_used, num_gpus=0)
+        assert ray.is_initialized() == True
 
         try:
             optim_cycle_name = self._generate_cycle_name(keys)
@@ -329,7 +425,7 @@ class RayTuneTuner(BaseTuner):
                 **configured_search_space
             }
 
-            configured_resources = self._calculate_resources()
+            configured_resources = self._calculate_resources(max_trial_num)
 
             tuning_params = self._initialize_tuning_params(
                 optimize_mode=optimize_mode,
@@ -362,8 +458,7 @@ class RayTuneTuner(BaseTuner):
 
         finally:
             # Stop Ray instance
-            # ray.shutdown()
-            # assert ray.is_initialized() == False
-            pass
+            ray.shutdown()
+            assert ray.is_initialized() == False
 
         return results
