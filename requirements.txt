@@ -24,10 +24,10 @@ setproctitle==1.2.2
 statsmodels==0.11.0
 syft==0.2.9
 syft-proto==0.5.3
-synergos_algorithm>=0.2.0
-synergos_archive>=0.2.0
-synergos_logger>=0.2.0
-synergos_manager>=0.2.0
+synergos_algorithm>=0.1.0
+synergos_archive>=0.1.0
+synergos_logger>=0.1.0
+synergos_manager>=0.1.0
 tensorflow==1.15.5
 tensorboardX==2.1
 tf-encrypted==0.5.9
