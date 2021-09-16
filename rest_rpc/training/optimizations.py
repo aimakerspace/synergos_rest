@@ -117,6 +117,9 @@ input_model = ns_api.model(
 stats_model = ns_api.model(
     name="statistics",
     model={
+        'R2': fields.Float(),
+        'MSE': fields.Float(),
+        'MAE': fields.Float(),
         'accuracy': fields.List(fields.Float()),
         'roc_auc_score': fields.List(fields.Float()),
         'pr_auc_score': fields.List(fields.Float()),
